@@ -38,6 +38,29 @@ if archivo and rangos_validos:
     df = pd.read_excel(archivo)
 
     # ----------------------------
+# FILTRO SUBCATEGORIA DINAMICO
+# ----------------------------
+if "Subcategoría" in df.columns:
+
+    subcategorias_disponibles = sorted(
+        df["Subcategoría"]
+        .dropna()
+        .astype(str)
+        .str.strip()
+        .unique()
+    )
+
+    subcategorias_seleccionadas = st.multiselect(
+        "Seleccione Subcategorías:",
+        subcategorias_disponibles,
+        default=subcategorias_disponibles  # todas seleccionadas por defecto
+    )
+else:
+    st.error("❌ El archivo no contiene la columna 'Subcategoría'")
+    st.stop()
+
+
+    # ----------------------------
     # 3. LIMPIAR NOMBRES DE COLUMNAS
     # ----------------------------
     df.columns = df.columns.str.strip()
@@ -54,14 +77,11 @@ if archivo and rangos_validos:
     )
 
     # ----------------------------
-    # 5. FILTRAR POR RANGO DE EDAD
+    # 5. FILTRAR POR RANGO DE EDAD, excluye los que no tienen nada en cruce y filtra por subcagteoria
     # ----------------------------
     df = df[df["RANGO_EDAD"].isin(rangos_validos)]
-
-    # ----------------------------
-    # 6. EXCLUIR LOS QUE TENGAN VALOR EN CRUCE
-    # ----------------------------
     df = df[df["CRUCE"].isna()]
+    df = df[df["Subcategoría"].isin(subcategorias_seleccionadas)]
 
     # ----------------------------
     # 7. COLUMNA AUXILIAR PARA ORDENAR POR DEUDA
