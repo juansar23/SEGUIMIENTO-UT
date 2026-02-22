@@ -6,11 +6,10 @@ import io
 # CONFIGURACION PAGINA
 # ----------------------------
 st.set_page_config(page_title="Seguimiento UT", layout="wide")
-
 st.title("📊 Seguimiento Unidad de Trabajo")
 
 # ----------------------------
-# 1. MENU MULTIPLE RANGO EDAD
+# MENU RANGO EDAD
 # ----------------------------
 opciones_rango = [
     "0 - 30",
@@ -25,23 +24,40 @@ opciones_rango = [
 rangos_validos = st.multiselect(
     "Seleccione uno o varios rangos de edad:",
     opciones_rango,
-    default=["0 - 30", "31 - 60", "61 - 90"]  # igual que tu script original
+    default=["0 - 30", "31 - 60", "61 - 90"]
 )
 
 # ----------------------------
-# 2. LEER ARCHIVO (ANTES ERA RUTA FIJA)
+# SUBIR ARCHIVO
 # ----------------------------
 archivo = st.file_uploader("Sube el archivo Excel", type=["xlsx"])
 
 if archivo and rangos_validos:
 
     df = pd.read_excel(archivo)
+    df.columns = df.columns.str.strip()
 
     # ----------------------------
-# FILTRO SUBCATEGORIA DINAMICO
-# ----------------------------
-if "Subcategoría" in df.columns:
+    # VALIDAR COLUMNAS NECESARIAS
+    # ----------------------------
+    columnas_necesarias = [
+        "TECNICOS INTEGRALES",
+        "RANGO_EDAD",
+        "CRUCE",
+        "DEUDA TOTAL",
+        "Unidad de trabajo",
+        "Subcategoría"
+    ]
 
+    faltantes = [col for col in columnas_necesarias if col not in df.columns]
+
+    if faltantes:
+        st.error(f"❌ El archivo no contiene las columnas: {faltantes}")
+        st.stop()
+
+    # ----------------------------
+    # FILTRO SUBCATEGORIA DINAMICO
+    # ----------------------------
     subcategorias_disponibles = sorted(
         df["Subcategoría"]
         .dropna()
@@ -53,20 +69,44 @@ if "Subcategoría" in df.columns:
     subcategorias_seleccionadas = st.multiselect(
         "Seleccione Subcategorías:",
         subcategorias_disponibles,
-        default=subcategorias_disponibles  # todas seleccionadas por defecto
+        default=subcategorias_disponibles
     )
-else:
-    st.error("❌ El archivo no contiene la columna 'Subcategoría'")
-    st.stop()
-
 
     # ----------------------------
-    # 3. LIMPIAR NOMBRES DE COLUMNAS
+    # FORMATEAR COLUMNAS FECHA
     # ----------------------------
-    df.columns = df.columns.str.strip()
+    columnas_fecha = [
+        "FECHA_VENCIMIENTO",
+        "ULT_FECHA_PAGO",
+        "FECHA DE ASIGNACION"
+    ]
+
+    for col in columnas_fecha:
+        if col in df.columns:
+            df[col] = pd.to_datetime(df[col], errors="coerce").dt.date
 
     # ----------------------------
-    # 4. LIMPIAR NOMBRES DE TECNICOS
+    # FORMATEAR COLUMNAS MONEDA
+    # ----------------------------
+    columnas_moneda = [
+        "VALOR_ULTIMA_FACTURA",
+        "ULT_PAGO",
+        "DEUDA TOTAL"
+    ]
+
+    for col in columnas_moneda:
+        if col in df.columns:
+            df[col] = (
+                df[col]
+                .astype(str)
+                .str.replace("$", "", regex=False)
+                .str.replace(",", "", regex=False)
+                .str.strip()
+            )
+            df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0)
+
+    # ----------------------------
+    # LIMPIAR TECNICOS
     # ----------------------------
     df["TECNICOS INTEGRALES"] = (
         df["TECNICOS INTEGRALES"]
@@ -77,33 +117,19 @@ else:
     )
 
     # ----------------------------
-    # 5. FILTRAR POR RANGO DE EDAD, excluye los que no tienen nada en cruce y filtra por subcagteoria
+    # FILTROS
     # ----------------------------
     df = df[df["RANGO_EDAD"].isin(rangos_validos)]
     df = df[df["CRUCE"].isna()]
     df = df[df["Subcategoría"].isin(subcategorias_seleccionadas)]
 
     # ----------------------------
-    # 7. COLUMNA AUXILIAR PARA ORDENAR POR DEUDA
+    # ORDENAR POR MAYOR DEUDA
     # ----------------------------
-    df["_deuda_num"] = (
-        df["DEUDA TOTAL"]
-        .astype(str)
-        .str.replace("$", "", regex=False)
-        .str.replace(",", "", regex=False)
-        .str.replace("-", "0", regex=False)
-        .str.strip()
-    )
-
-    df["_deuda_num"] = pd.to_numeric(df["_deuda_num"], errors="coerce").fillna(0)
+    df = df.sort_values(by="DEUDA TOTAL", ascending=False)
 
     # ----------------------------
-    # 8. ORDENAR POR MAYOR DEUDA
-    # ----------------------------
-    df = df.sort_values(by="_deuda_num", ascending=False)
-
-    # ----------------------------
-    # 9. TOMAR MAXIMO 50 POR UNIDAD OPERATIVA
+    # MAXIMO 50 POR UNIDAD
     # ----------------------------
     df_final = (
         df.groupby("Unidad de trabajo")
@@ -111,20 +137,49 @@ else:
         .reset_index(drop=True)
     )
 
-    # Eliminar columna auxiliar
-    df_final = df_final.drop(columns=["_deuda_num"])
-
     # ----------------------------
-    # MOSTRAR RESULTADO
+    # MOSTRAR RESULTADO FORMATEADO
     # ----------------------------
     st.success("✅ Archivo procesado correctamente")
-    st.dataframe(df_final, use_container_width=True)
+
+    formato_monedas = {
+        "VALOR_ULTIMA_FACTURA": "${:,.0f}",
+        "ULT_PAGO": "${:,.0f}",
+        "DEUDA TOTAL": "${:,.0f}"
+    }
+
+    columnas_formato = {k: v for k, v in formato_monedas.items() if k in df_final.columns}
+
+    st.dataframe(
+        df_final.style.format(columnas_formato),
+        use_container_width=True
+    )
 
     # ----------------------------
-    # 10. DESCARGAR EXCEL (REEMPLAZA TKINTER)
+    # EXPORTAR A EXCEL CON FORMATO
     # ----------------------------
     buffer = io.BytesIO()
-    df_final.to_excel(buffer, index=False, engine="openpyxl")
+
+    with pd.ExcelWriter(buffer, engine="openpyxl") as writer:
+        df_final.to_excel(writer, index=False, sheet_name="Resultado")
+
+        workbook = writer.book
+        worksheet = writer.sheets["Resultado"]
+
+        # Formato moneda en Excel
+        for col in columnas_moneda:
+            if col in df_final.columns:
+                col_idx = df_final.columns.get_loc(col) + 1
+                for row in range(2, len(df_final) + 2):
+                    worksheet.cell(row=row, column=col_idx).number_format = '"$"#,##0'
+
+        # Formato fecha en Excel
+        for col in columnas_fecha:
+            if col in df_final.columns:
+                col_idx = df_final.columns.get_loc(col) + 1
+                for row in range(2, len(df_final) + 2):
+                    worksheet.cell(row=row, column=col_idx).number_format = 'DD/MM/YYYY'
+
     buffer.seek(0)
 
     st.download_button(
