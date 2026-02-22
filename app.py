@@ -13,9 +13,9 @@ if archivo:
     df = pd.read_excel(archivo)
     df.columns = df.columns.str.strip()
 
-    # -----------------------------
+    # ---------------------------------
     # DETECTAR COLUMNA SUBCATEGORIA
-    # -----------------------------
+    # ---------------------------------
     columnas_normalizadas = {col.lower(): col for col in df.columns}
 
     if "subcategoría" in columnas_normalizadas:
@@ -26,9 +26,20 @@ if archivo:
         st.error("❌ No existe columna Subcategoría")
         st.stop()
 
-    # -----------------------------
+    # ---------------------------------
+    # VALIDAR COLUMNAS NECESARIAS
+    # ---------------------------------
+    if "RANGO_EDAD" not in df.columns:
+        st.error("❌ No existe columna RANGO_EDAD")
+        st.stop()
+
+    if "TECNICOS INTEGRALES" not in df.columns:
+        st.error("❌ No existe columna TECNICOS INTEGRALES")
+        st.stop()
+
+    # ---------------------------------
     # FILTRO RANGO EDAD
-    # -----------------------------
+    # ---------------------------------
     rangos_disponibles = sorted(
         df["RANGO_EDAD"]
         .dropna()
@@ -43,9 +54,9 @@ if archivo:
         default=rangos_disponibles
     )
 
-    # -----------------------------
+    # ---------------------------------
     # FILTRO SUBCATEGORIA
-    # -----------------------------
+    # ---------------------------------
     subcategorias_disponibles = sorted(
         df[col_sub]
         .dropna()
@@ -60,9 +71,26 @@ if archivo:
         default=subcategorias_disponibles
     )
 
-    # -----------------------------
+    # ---------------------------------
+    # FILTRO TECNICOS INTEGRALES
+    # ---------------------------------
+    tecnicos_disponibles = sorted(
+        df["TECNICOS INTEGRALES"]
+        .dropna()
+        .astype(str)
+        .str.strip()
+        .unique()
+    )
+
+    tecnicos_seleccionados = st.multiselect(
+        "Seleccione Técnicos Integrales:",
+        tecnicos_disponibles,
+        default=tecnicos_disponibles
+    )
+
+    # ---------------------------------
     # CONVERTIR DEUDA TOTAL A NUMERO
-    # -----------------------------
+    # ---------------------------------
     df["_deuda_num"] = (
         df["DEUDA TOTAL"]
         .astype(str)
@@ -74,9 +102,9 @@ if archivo:
 
     df["_deuda_num"] = pd.to_numeric(df["_deuda_num"], errors="coerce").fillna(0)
 
-    # -----------------------------
+    # ---------------------------------
     # FILTRO DEUDA MINIMA
-    # -----------------------------
+    # ---------------------------------
     deuda_minima = st.number_input(
         "Filtrar deudas mayores a:",
         min_value=0,
@@ -84,18 +112,34 @@ if archivo:
         step=50000
     )
 
-    # -----------------------------
-    # APLICAR FILTROS
-    # -----------------------------
+    # ---------------------------------
+    # APLICAR TODOS LOS FILTROS
+    # ---------------------------------
     df_filtrado = df[
         (df["RANGO_EDAD"].astype(str).isin(rangos_seleccionados)) &
         (df[col_sub].astype(str).isin(subcategorias_seleccionadas)) &
+        (df["TECNICOS INTEGRALES"].astype(str).isin(tecnicos_seleccionados)) &
         (df["_deuda_num"] >= deuda_minima)
     ].copy()
 
-    # -----------------------------
+    # ---------------------------------
+    # ORDENAR POR MAYOR DEUDA
+    # ---------------------------------
+    df_filtrado = df_filtrado.sort_values(by="_deuda_num", ascending=False)
+
+    # ---------------------------------
+    # MAXIMO 50 POLIZAS POR TECNICO
+    # ---------------------------------
+    df_filtrado = (
+        df_filtrado
+        .groupby("TECNICOS INTEGRALES")
+        .head(50)
+        .reset_index(drop=True)
+    )
+
+    # ---------------------------------
     # FORMATO FECHA CORTA
-    # -----------------------------
+    # ---------------------------------
     columnas_fecha = [
         "FECHA_VENCIMIENTO",
         "ULT_FECHA_PAGO",
@@ -111,12 +155,15 @@ if archivo:
     # Eliminar columna auxiliar
     df_filtrado = df_filtrado.drop(columns=["_deuda_num"])
 
-    st.success(f"Registros encontrados: {len(df_filtrado)}")
+    # ---------------------------------
+    # MOSTRAR RESULTADO
+    # ---------------------------------
+    st.success(f"Registros finales: {len(df_filtrado)}")
     st.dataframe(df_filtrado, use_container_width=True)
 
-    # -----------------------------
+    # ---------------------------------
     # BOTON DESCARGAR
-    # -----------------------------
+    # ---------------------------------
     if not df_filtrado.empty:
 
         output = io.BytesIO()
@@ -129,3 +176,6 @@ if archivo:
             file_name="resultado_filtrado.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         )
+
+else:
+    st.info("Sube un archivo para comenzar.")
