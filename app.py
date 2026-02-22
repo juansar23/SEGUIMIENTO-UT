@@ -1,65 +1,57 @@
 import streamlit as st
 import pandas as pd
-import io
 
-# ----------------------------
-# CONFIGURACION PAGINA
-# ----------------------------
-st.set_page_config(page_title="Seguimiento UT", layout="wide")
-st.title("📊 Seguimiento Unidad de Trabajo")
+st.set_page_config(page_title="Filtro Dinámico", layout="wide")
 
-# ----------------------------
-# MENU RANGO EDAD
-# ----------------------------
-opciones_rango = [
-    "0 - 30",
-    "31 - 60",
-    "61 - 90",
-    "91 - 120",
-    "121 - 360",
-    "361 - 1080",
-    "> 1080"
-]
+st.title("📊 Filtro por Rango de Edad y Subcategoría")
 
-rangos_validos = st.multiselect(
-    "Seleccione uno o varios rangos de edad:",
-    opciones_rango,
-    default=["0 - 30", "31 - 60", "61 - 90"]
-)
-
-# ----------------------------
-# SUBIR ARCHIVO
-# ----------------------------
 archivo = st.file_uploader("Sube el archivo Excel", type=["xlsx"])
 
-if archivo and rangos_validos:
+if archivo:
 
     df = pd.read_excel(archivo)
+
+    # Limpiar nombres de columnas
     df.columns = df.columns.str.strip()
 
-    # ----------------------------
-    # VALIDAR COLUMNAS NECESARIAS
-    # ----------------------------
-    columnas_necesarias = [
-        "TECNICOS INTEGRALES",
-        "RANGO_EDAD",
-        "CRUCE",
-        "DEUDA TOTAL",
-        "Unidad de trabajo",
-        "Subcategoría"
-    ]
+    # Normalizar nombre Subcategoría (con o sin tilde)
+    columnas_normalizadas = {col.lower(): col for col in df.columns}
 
-    faltantes = [col for col in columnas_necesarias if col not in df.columns]
-
-    if faltantes:
-        st.error(f"❌ El archivo no contiene las columnas: {faltantes}")
+    if "subcategoría" in columnas_normalizadas:
+        col_sub = columnas_normalizadas["subcategoría"]
+    elif "subcategoria" in columnas_normalizadas:
+        col_sub = columnas_normalizadas["subcategoria"]
+    else:
+        st.error("❌ No existe columna Subcategoría en el archivo")
+        st.write("Columnas detectadas:", df.columns.tolist())
         st.stop()
 
-    # ----------------------------
-    # FILTRO SUBCATEGORIA DINAMICO
-    # ----------------------------
+    # -----------------------
+    # FILTRO RANGO EDAD
+    # -----------------------
+    if "RANGO_EDAD" not in df.columns:
+        st.error("❌ No existe columna RANGO_EDAD")
+        st.stop()
+
+    rangos_disponibles = sorted(
+        df["RANGO_EDAD"]
+        .dropna()
+        .astype(str)
+        .str.strip()
+        .unique()
+    )
+
+    rangos_seleccionados = st.multiselect(
+        "Seleccione Rangos de Edad:",
+        rangos_disponibles,
+        default=rangos_disponibles
+    )
+
+    # -----------------------
+    # FILTRO SUBCATEGORIA
+    # -----------------------
     subcategorias_disponibles = sorted(
-        df["Subcategoría"]
+        df[col_sub]
         .dropna()
         .astype(str)
         .str.strip()
@@ -72,122 +64,40 @@ if archivo and rangos_validos:
         default=subcategorias_disponibles
     )
 
-    # ----------------------------
-    # FORMATEAR COLUMNAS FECHA
-    # ----------------------------
+    # -----------------------
+    # APLICAR FILTROS
+    # -----------------------
+    df_filtrado = df[
+        (df["RANGO_EDAD"].astype(str).isin(rangos_seleccionados)) &
+        (df[col_sub].astype(str).isin(subcategorias_seleccionadas))
+    ]
+
+    st.write("### Resultado filtrado")
+    st.dataframe(df_filtrado)
+
+    # -----------------------
+    # FORMATO DE COLUMNAS
+    # -----------------------
     columnas_fecha = [
         "FECHA_VENCIMIENTO",
         "ULT_FECHA_PAGO",
         "FECHA DE ASIGNACION"
     ]
 
-    for col in columnas_fecha:
-        if col in df.columns:
-            df[col] = pd.to_datetime(df[col], errors="coerce").dt.date
-
-    # ----------------------------
-    # FORMATEAR COLUMNAS MONEDA
-    # ----------------------------
     columnas_moneda = [
         "VALOR_ULTIMA_FACTURA",
         "ULT_PAGO",
         "DEUDA TOTAL"
     ]
 
+    for col in columnas_fecha:
+        if col in df_filtrado.columns:
+            df_filtrado[col] = pd.to_datetime(df_filtrado[col], errors="coerce").dt.strftime("%d/%m/%Y")
+
     for col in columnas_moneda:
-        if col in df.columns:
-            df[col] = (
-                df[col]
-                .astype(str)
-                .str.replace("$", "", regex=False)
-                .str.replace(",", "", regex=False)
-                .str.strip()
-            )
-            df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0)
+        if col in df_filtrado.columns:
+            df_filtrado[col] = pd.to_numeric(df_filtrado[col], errors="coerce")
 
-    # ----------------------------
-    # LIMPIAR TECNICOS
-    # ----------------------------
-    df["TECNICOS INTEGRALES"] = (
-        df["TECNICOS INTEGRALES"]
-        .astype(str)
-        .str.strip()
-        .str.replace(r"\s+", " ", regex=True)
-        .str.upper()
-    )
+    st.write("### Datos con formato aplicado")
+    st.dataframe(df_filtrado)
 
-    # ----------------------------
-    # FILTROS
-    # ----------------------------
-    df = df[df["RANGO_EDAD"].isin(rangos_validos)]
-    df = df[df["CRUCE"].isna()]
-    df = df[df["Subcategoría"].isin(subcategorias_seleccionadas)]
-
-    # ----------------------------
-    # ORDENAR POR MAYOR DEUDA
-    # ----------------------------
-    df = df.sort_values(by="DEUDA TOTAL", ascending=False)
-
-    # ----------------------------
-    # MAXIMO 50 POR UNIDAD
-    # ----------------------------
-    df_final = (
-        df.groupby("Unidad de trabajo")
-        .head(50)
-        .reset_index(drop=True)
-    )
-
-    # ----------------------------
-    # MOSTRAR RESULTADO FORMATEADO
-    # ----------------------------
-    st.success("✅ Archivo procesado correctamente")
-
-    formato_monedas = {
-        "VALOR_ULTIMA_FACTURA": "${:,.0f}",
-        "ULT_PAGO": "${:,.0f}",
-        "DEUDA TOTAL": "${:,.0f}"
-    }
-
-    columnas_formato = {k: v for k, v in formato_monedas.items() if k in df_final.columns}
-
-    st.dataframe(
-        df_final.style.format(columnas_formato),
-        use_container_width=True
-    )
-
-    # ----------------------------
-    # EXPORTAR A EXCEL CON FORMATO
-    # ----------------------------
-    buffer = io.BytesIO()
-
-    with pd.ExcelWriter(buffer, engine="openpyxl") as writer:
-        df_final.to_excel(writer, index=False, sheet_name="Resultado")
-
-        workbook = writer.book
-        worksheet = writer.sheets["Resultado"]
-
-        # Formato moneda en Excel
-        for col in columnas_moneda:
-            if col in df_final.columns:
-                col_idx = df_final.columns.get_loc(col) + 1
-                for row in range(2, len(df_final) + 2):
-                    worksheet.cell(row=row, column=col_idx).number_format = '"$"#,##0'
-
-        # Formato fecha en Excel
-        for col in columnas_fecha:
-            if col in df_final.columns:
-                col_idx = df_final.columns.get_loc(col) + 1
-                for row in range(2, len(df_final) + 2):
-                    worksheet.cell(row=row, column=col_idx).number_format = 'DD/MM/YYYY'
-
-    buffer.seek(0)
-
-    st.download_button(
-        label="📥 Descargar archivo procesado",
-        data=buffer,
-        file_name="resultado_filtrado.xlsx",
-        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-    )
-
-elif archivo and not rangos_validos:
-    st.warning("⚠️ Debes seleccionar al menos un rango.")
