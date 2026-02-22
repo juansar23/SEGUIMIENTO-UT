@@ -2,17 +2,15 @@ import streamlit as st
 import pandas as pd
 import io
 
-st.set_page_config(page_title="Filtro Dinámico", layout="wide")
+st.set_page_config(page_title="Seguimiento UT", layout="wide")
 
-st.title("📊 Filtro por Rango de Edad y Subcategoría")
+st.title("📊 Seguimiento Unidad de Trabajo")
 
 archivo = st.file_uploader("Sube el archivo Excel", type=["xlsx"])
 
 if archivo:
 
     df = pd.read_excel(archivo)
-
-    # Limpiar nombres de columnas
     df.columns = df.columns.str.strip()
 
     # -----------------------------
@@ -25,15 +23,7 @@ if archivo:
     elif "subcategoria" in columnas_normalizadas:
         col_sub = columnas_normalizadas["subcategoria"]
     else:
-        st.error("❌ No existe columna Subcategoría en el archivo")
-        st.write("Columnas detectadas:", df.columns.tolist())
-        st.stop()
-
-    # -----------------------------
-    # VALIDAR RANGO EDAD
-    # -----------------------------
-    if "RANGO_EDAD" not in df.columns:
-        st.error("❌ No existe columna RANGO_EDAD")
+        st.error("❌ No existe columna Subcategoría")
         st.stop()
 
     # -----------------------------
@@ -71,50 +61,66 @@ if archivo:
     )
 
     # -----------------------------
+    # CONVERTIR DEUDA TOTAL A NUMERO
+    # -----------------------------
+    df["_deuda_num"] = (
+        df["DEUDA TOTAL"]
+        .astype(str)
+        .str.replace("$", "", regex=False)
+        .str.replace(",", "", regex=False)
+        .str.replace(".", "", regex=False)
+        .str.strip()
+    )
+
+    df["_deuda_num"] = pd.to_numeric(df["_deuda_num"], errors="coerce").fillna(0)
+
+    # -----------------------------
+    # FILTRO DEUDA MINIMA
+    # -----------------------------
+    deuda_minima = st.number_input(
+        "Filtrar deudas mayores a:",
+        min_value=0,
+        value=100000,
+        step=50000
+    )
+
+    # -----------------------------
     # APLICAR FILTROS
     # -----------------------------
     df_filtrado = df[
         (df["RANGO_EDAD"].astype(str).isin(rangos_seleccionados)) &
-        (df[col_sub].astype(str).isin(subcategorias_seleccionadas))
+        (df[col_sub].astype(str).isin(subcategorias_seleccionadas)) &
+        (df["_deuda_num"] >= deuda_minima)
     ].copy()
 
-    st.write("### Resultado filtrado")
+    # -----------------------------
+    # FORMATO FECHA CORTA
+    # -----------------------------
+    columnas_fecha = [
+        "FECHA_VENCIMIENTO",
+        "ULT_FECHA_PAGO",
+        "FECHA DE ASIGNACION"
+    ]
+
+    for col in columnas_fecha:
+        if col in df_filtrado.columns:
+            df_filtrado[col] = pd.to_datetime(
+                df_filtrado[col], errors="coerce"
+            ).dt.strftime("%d-%m-%Y")
+
+    # Eliminar columna auxiliar
+    df_filtrado = df_filtrado.drop(columns=["_deuda_num"])
+
+    st.success(f"Registros encontrados: {len(df_filtrado)}")
     st.dataframe(df_filtrado, use_container_width=True)
 
     # -----------------------------
-    # PREPARAR DESCARGA EXCEL
+    # BOTON DESCARGAR
     # -----------------------------
     if not df_filtrado.empty:
 
         output = io.BytesIO()
-
-        with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
-            df_filtrado.to_excel(writer, index=False, sheet_name='Filtrado')
-
-            workbook = writer.book
-            worksheet = writer.sheets['Filtrado']
-
-            formato_fecha = workbook.add_format({'num_format': 'dd/mm/yyyy'})
-            formato_moneda = workbook.add_format({'num_format': '$#,##0'})
-
-            columnas_fecha = [
-                "FECHA_VENCIMIENTO",
-                "ULT_FECHA_PAGO",
-                "FECHA DE ASIGNACION"
-            ]
-
-            columnas_moneda = [
-                "VALOR_ULTIMA_FACTURA",
-                "ULT_PAGO",
-                "DEUDA TOTAL"
-            ]
-
-            for idx, col in enumerate(df_filtrado.columns):
-                if col in columnas_fecha:
-                    worksheet.set_column(idx, idx, 15, formato_fecha)
-                if col in columnas_moneda:
-                    worksheet.set_column(idx, idx, 18, formato_moneda)
-
+        df_filtrado.to_excel(output, index=False, engine="openpyxl")
         output.seek(0)
 
         st.download_button(
@@ -123,6 +129,3 @@ if archivo:
             file_name="resultado_filtrado.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         )
-
-    else:
-        st.warning("⚠ No hay datos con los filtros seleccionados")
