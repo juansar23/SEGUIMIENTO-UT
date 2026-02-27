@@ -112,6 +112,22 @@ if archivo:
     )
 
     # ==================================================
+    # FORMATEAR COLUMNAS DE FECHA (SIN HORA)
+    # ==================================================
+    columnas_fecha = [
+        "FECHA_VENCIMIENTO",
+        "ULT_FECHA_PAGO",
+        "FECHA DE ASIGNACION"
+    ]
+
+    for col in columnas_fecha:
+        if col in df_filtrado.columns:
+            df_filtrado[col] = pd.to_datetime(
+                df_filtrado[col],
+                errors="coerce"
+            ).dt.strftime("%d/%m/%Y")
+
+    # ==================================================
     # TABS
     # ==================================================
     tab1, tab2 = st.tabs(["📋 Tabla", "📊 Dashboard Ejecutivo"])
@@ -189,7 +205,7 @@ if archivo:
         st.plotly_chart(fig_pie, use_container_width=True)
 
         # ==================================================
-        # RANGO EDAD CORREGIDO
+        # RANGO EDAD ORDEN PERSONALIZADO
         # ==================================================
         st.subheader("📊 Pólizas por Rango de Edad")
 
