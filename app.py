@@ -2,7 +2,6 @@ import streamlit as st
 import pandas as pd
 import io
 import plotly.express as px
-from openpyxl.styles import numbers
 
 st.set_page_config(page_title="Dashboard Ejecutivo UT", layout="wide")
 
@@ -77,7 +76,7 @@ if archivo:
         st.experimental_rerun()
 
     # ==================================================
-    # LIMPIAR DEUDA PARA CALCULOS
+    # LIMPIAR DEUDA
     # ==================================================
     df["_deuda_num"] = (
         df["DEUDA TOTAL"]
@@ -113,7 +112,7 @@ if archivo:
     )
 
     # ==================================================
-    # FORMATEAR FECHAS
+    # FORMATEAR COLUMNAS DE FECHA (SIN HORA)
     # ==================================================
     columnas_fecha = [
         "FECHA_VENCIMIENTO",
@@ -134,7 +133,7 @@ if archivo:
     tab1, tab2 = st.tabs(["📋 Tabla", "📊 Dashboard Ejecutivo"])
 
     # ==================================================
-    # TABLA + DESCARGA CON FORMATO MONEDA REAL
+    # TABLA
     # ==================================================
     with tab1:
 
@@ -144,44 +143,9 @@ if archivo:
         st.dataframe(df_filtrado, use_container_width=True)
 
         if not df_filtrado.empty:
-
             output = io.BytesIO()
-            df_export = df_filtrado.copy()
-
-            columnas_moneda = [
-                "ULT_PAGO",
-                "VALOR_ULTIMA_FACTURA",
-                "DEUDA TOTAL"
-            ]
-
-            # Convertir a número real
-            for col in columnas_moneda:
-                if col in df_export.columns:
-                    df_export[col] = (
-                        df_export[col]
-                        .astype(str)
-                        .str.replace("$", "", regex=False)
-                        .str.replace(",", "", regex=False)
-                        .str.replace(".", "", regex=False)
-                        .str.strip()
-                    )
-                    df_export[col] = pd.to_numeric(df_export[col], errors="coerce").fillna(0)
-
-            df_export = df_export.drop(columns=["_deuda_num"], errors="ignore")
-
-            with pd.ExcelWriter(output, engine="openpyxl") as writer:
-                df_export.to_excel(writer, index=False, sheet_name="Reporte")
-
-                workbook = writer.book
-                worksheet = writer.sheets["Reporte"]
-
-                for col in columnas_moneda:
-                    if col in df_export.columns:
-                        col_idx = df_export.columns.get_loc(col) + 1
-
-                        for row in range(2, len(df_export) + 2):
-                            worksheet.cell(row=row, column=col_idx).number_format = '"$"#,##0'
-
+            df_export = df_filtrado.drop(columns=["_deuda_num"], errors="ignore")
+            df_export.to_excel(output, index=False, engine="openpyxl")
             output.seek(0)
 
             st.download_button(
@@ -205,12 +169,14 @@ if archivo:
         col1, col2, col3 = st.columns(3)
 
         col1.metric("Total Pólizas", total_polizas)
-        col2.metric("Total Deuda", f"$ {total_deuda:,.0f}")
+        col2.metric("Total Deuda", f"${total_deuda:,.0f}")
         col3.metric("Técnicos Activos", tecnicos_activos)
 
         st.divider()
 
-        # TOP 10 TABLA
+        # ==================================================
+        # TOP 10 EN TABLA
+        # ==================================================
         st.subheader("🏆 Top 10 Técnicos con Mayor Deuda")
 
         top10 = (
@@ -223,11 +189,13 @@ if archivo:
         )
 
         top10.columns = ["Técnico Integral", "Total Deuda"]
-        top10["Total Deuda"] = top10["Total Deuda"].apply(lambda x: f"$ {x:,.0f}")
+        top10["Total Deuda"] = top10["Total Deuda"].apply(lambda x: f"${x:,.0f}")
 
         st.dataframe(top10, use_container_width=True)
 
-        # PIE SUBCATEGORIA
+        # ==================================================
+        # SUBCATEGORIA
+        # ==================================================
         st.subheader("🥧 Distribución por Subcategoría")
 
         conteo_sub = df_filtrado[col_sub].value_counts().reset_index()
@@ -236,8 +204,17 @@ if archivo:
         fig_pie = px.pie(conteo_sub, names="Subcategoría", values="Cantidad")
         st.plotly_chart(fig_pie, use_container_width=True)
 
-        # BARRAS RANGO EDAD
+        # ==================================================
+        # RANGO EDAD ORDEN PERSONALIZADO
+        # ==================================================
         st.subheader("📊 Pólizas por Rango de Edad")
+
+        df_filtrado["RANGO_EDAD"] = (
+            df_filtrado["RANGO_EDAD"]
+            .astype(str)
+            .str.strip()
+            .str.replace(" ", "", regex=False)
+        )
 
         orden_personalizado = [
             "0-30",
@@ -249,7 +226,7 @@ if archivo:
             ">1080"
         ]
 
-        conteo_real = df_filtrado["RANGO_EDAD"].astype(str).value_counts()
+        conteo_real = df_filtrado["RANGO_EDAD"].value_counts()
 
         conteo_edad = pd.DataFrame({
             "Rango Edad": orden_personalizado,
