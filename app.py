@@ -1,6 +1,7 @@
 import streamlit as st
 import pandas as pd
 import io
+import matplotlib.pyplot as plt
 
 st.set_page_config(page_title="Seguimiento UT", layout="wide")
 
@@ -72,7 +73,7 @@ if archivo:
     )
 
     # ---------------------------------
-    # FILTRO TECNICOS INTEGRALES
+    # FILTRO TECNICOS
     # ---------------------------------
     tecnicos_disponibles = sorted(
         df["TECNICOS INTEGRALES"]
@@ -113,7 +114,7 @@ if archivo:
     )
 
     # ---------------------------------
-    # APLICAR TODOS LOS FILTROS
+    # APLICAR FILTROS
     # ---------------------------------
     df_filtrado = df[
         (df["RANGO_EDAD"].astype(str).isin(rangos_seleccionados)) &
@@ -122,14 +123,10 @@ if archivo:
         (df["_deuda_num"] >= deuda_minima)
     ].copy()
 
-    # ---------------------------------
-    # ORDENAR POR MAYOR DEUDA
-    # ---------------------------------
+    # Ordenar por mayor deuda
     df_filtrado = df_filtrado.sort_values(by="_deuda_num", ascending=False)
 
-    # ---------------------------------
-    # MAXIMO 50 POLIZAS POR TECNICO
-    # ---------------------------------
+    # Máximo 50 pólizas por técnico
     df_filtrado = (
         df_filtrado
         .groupby("TECNICOS INTEGRALES")
@@ -152,14 +149,45 @@ if archivo:
                 df_filtrado[col], errors="coerce"
             ).dt.strftime("%d-%m-%Y")
 
-    # Eliminar columna auxiliar
     df_filtrado = df_filtrado.drop(columns=["_deuda_num"])
 
     # ---------------------------------
-    # MOSTRAR RESULTADO
+    # MOSTRAR TABLA FINAL
     # ---------------------------------
     st.success(f"Registros finales: {len(df_filtrado)}")
     st.dataframe(df_filtrado, use_container_width=True)
+
+    # =================================
+    # 📊 GRAFICA 1: POLIZAS POR SUBCATEGORIA
+    # =================================
+    st.subheader("📊 Pólizas por Subcategoría")
+
+    conteo_sub = df_filtrado[col_sub].value_counts()
+
+    fig1, ax1 = plt.subplots()
+    conteo_sub.plot(kind="bar", ax=ax1)
+    ax1.set_ylabel("Cantidad de Pólizas")
+    ax1.set_xlabel("Subcategoría")
+    ax1.set_title("Cantidad de Pólizas por Subcategoría")
+    plt.xticks(rotation=45)
+
+    st.pyplot(fig1)
+
+    # =================================
+    # 📊 GRAFICA 2: POLIZAS POR RANGO EDAD
+    # =================================
+    st.subheader("📊 Pólizas por Rango de Edad")
+
+    conteo_edad = df_filtrado["RANGO_EDAD"].value_counts()
+
+    fig2, ax2 = plt.subplots()
+    conteo_edad.plot(kind="bar", ax=ax2)
+    ax2.set_ylabel("Cantidad de Pólizas")
+    ax2.set_xlabel("Rango de Edad")
+    ax2.set_title("Cantidad de Pólizas por Rango de Edad")
+    plt.xticks(rotation=45)
+
+    st.pyplot(fig2)
 
     # ---------------------------------
     # BOTON DESCARGAR
