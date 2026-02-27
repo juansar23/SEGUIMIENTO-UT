@@ -3,7 +3,7 @@ import pandas as pd
 import io
 import plotly.express as px
 
-st.set_page_config(page_title="Seguimiento UT - Dashboard Ejecutivo", layout="wide")
+st.set_page_config(page_title="Dashboard Ejecutivo UT", layout="wide")
 
 st.title("📊 Dashboard Ejecutivo - Seguimiento Unidad de Trabajo")
 
@@ -14,9 +14,9 @@ if archivo:
     df = pd.read_excel(archivo)
     df.columns = df.columns.str.strip()
 
-    # ==============================
+    # ==================================================
     # DETECTAR SUBCATEGORIA
-    # ==============================
+    # ==================================================
     columnas_normalizadas = {col.lower(): col for col in df.columns}
 
     if "subcategoría" in columnas_normalizadas:
@@ -34,7 +34,7 @@ if archivo:
             st.stop()
 
     # ==================================================
-    # 🎯 SIDEBAR
+    # SIDEBAR FILTROS
     # ==================================================
     st.sidebar.header("🎯 Filtros")
 
@@ -53,17 +53,14 @@ if archivo:
     )
 
     # ==================================================
-    # 👥 FILTRO INTELIGENTE DE TECNICOS
+    # FILTRO INTELIGENTE TECNICOS
     # ==================================================
     st.sidebar.subheader("👥 Técnicos Integrales")
 
     modo_exclusion = st.sidebar.checkbox("🧠 Seleccionar todos excepto...")
 
     if modo_exclusion:
-        tecnicos_excluir = st.sidebar.multiselect(
-            "🚫 Técnicos a excluir",
-            tecnicos
-        )
+        tecnicos_excluir = st.sidebar.multiselect("🚫 Técnicos a excluir", tecnicos)
         tecnicos_final = [t for t in tecnicos if t not in tecnicos_excluir]
     else:
         tecnicos_final = st.sidebar.multiselect(
@@ -72,11 +69,9 @@ if archivo:
             default=tecnicos
         )
 
-    # Mostrar técnicos activos
     st.sidebar.markdown("---")
     st.sidebar.markdown(f"📊 **Técnicos activos:** {len(tecnicos_final)}")
 
-    # Botón limpiar filtros
     if st.sidebar.button("⚡ Limpiar filtros"):
         st.experimental_rerun()
 
@@ -94,7 +89,7 @@ if archivo:
     df["_deuda_num"] = pd.to_numeric(df["_deuda_num"], errors="coerce").fillna(0)
 
     # ==================================================
-    # FILTROS
+    # FILTRAR
     # ==================================================
     df_filtrado = df[
         (df["RANGO_EDAD"].astype(str).isin(rangos_sel)) &
@@ -105,7 +100,7 @@ if archivo:
 
     df_filtrado = df_filtrado.sort_values(by="_deuda_num", ascending=False)
 
-    # Limite 50 pólizas por técnico
+    # LIMITE 50 POLIZAS POR TECNICO
     df_filtrado = (
         df_filtrado
         .groupby("TECNICOS INTEGRALES")
@@ -160,10 +155,12 @@ if archivo:
 
         st.divider()
 
-        # TOP 10
+        # ==================================================
+        # TOP 10 EN TABLA
+        # ==================================================
         st.subheader("🏆 Top 10 Técnicos con Mayor Deuda")
 
-        deuda_tecnico = (
+        top10 = (
             df_filtrado
             .groupby("TECNICOS INTEGRALES")["_deuda_num"]
             .sum()
@@ -172,16 +169,14 @@ if archivo:
             .reset_index()
         )
 
-        fig_top = px.bar(
-            deuda_tecnico,
-            x="TECNICOS INTEGRALES",
-            y="_deuda_num",
-            text_auto=True
-        )
+        top10.columns = ["Técnico Integral", "Total Deuda"]
+        top10["Total Deuda"] = top10["Total Deuda"].apply(lambda x: f"${x:,.0f}")
 
-        st.plotly_chart(fig_top, use_container_width=True)
+        st.dataframe(top10, use_container_width=True)
 
+        # ==================================================
         # SUBCATEGORIA
+        # ==================================================
         st.subheader("🥧 Distribución por Subcategoría")
 
         conteo_sub = df_filtrado[col_sub].value_counts().reset_index()
@@ -190,13 +185,37 @@ if archivo:
         fig_pie = px.pie(conteo_sub, names="Subcategoría", values="Cantidad")
         st.plotly_chart(fig_pie, use_container_width=True)
 
-        # RANGO EDAD
+        # ==================================================
+        # RANGO EDAD ORDEN PERSONALIZADO
+        # ==================================================
         st.subheader("📊 Pólizas por Rango de Edad")
 
-        conteo_edad = df_filtrado["RANGO_EDAD"].value_counts().reset_index()
+        orden_personalizado = [
+            "0-30",
+            "31-60",
+            "61-90",
+            "91-120",
+            "121-360",
+            "361-1080",
+            ">1080"
+        ]
+
+        conteo_edad = (
+            df_filtrado["RANGO_EDAD"]
+            .value_counts()
+            .reindex(orden_personalizado, fill_value=0)
+            .reset_index()
+        )
+
         conteo_edad.columns = ["Rango Edad", "Cantidad"]
 
-        fig_edad = px.bar(conteo_edad, x="Rango Edad", y="Cantidad", text_auto=True)
+        fig_edad = px.bar(
+            conteo_edad,
+            x="Rango Edad",
+            y="Cantidad",
+            text_auto=True
+        )
+
         st.plotly_chart(fig_edad, use_container_width=True)
 
 else:
