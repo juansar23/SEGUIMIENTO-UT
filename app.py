@@ -27,9 +27,6 @@ if archivo:
         st.error("No existe columna Subcategoría")
         st.stop()
 
-    # ==============================
-    # VALIDAR COLUMNAS
-    # ==============================
     if "RANGO_EDAD" not in df.columns:
         st.error("No existe columna RANGO_EDAD")
         st.stop()
@@ -38,14 +35,13 @@ if archivo:
         st.error("No existe columna TECNICOS INTEGRALES")
         st.stop()
 
-    # ==============================
-    # PANEL LATERAL (FILTROS)
-    # ==============================
-    st.sidebar.header("🎯 Filtros")
+    # ==================================================
+    # 🎯 SIDEBAR - FILTROS GENERALES
+    # ==================================================
+    st.sidebar.header("🎯 Filtros Generales")
 
     rangos = sorted(df["RANGO_EDAD"].dropna().astype(str).unique())
     subcategorias = sorted(df[col_sub].dropna().astype(str).unique())
-    tecnicos = sorted(df["TECNICOS INTEGRALES"].dropna().astype(str).unique())
 
     rangos_sel = st.sidebar.multiselect(
         "Rango Edad",
@@ -59,13 +55,6 @@ if archivo:
         default=subcategorias
     )
 
-    tecnicos_sel = st.sidebar.multiselect(
-        "Técnicos Integrales",
-        tecnicos,
-        default=tecnicos,
-        help="Escribe para buscar un técnico específico"
-    )
-
     deuda_minima = st.sidebar.number_input(
         "Deudas mayores a:",
         min_value=0,
@@ -73,9 +62,25 @@ if archivo:
         step=50000
     )
 
-    # ==============================
+    # ==================================================
+    # 👥 SELECTOR GRANDE DE TECNICOS (AREA PRINCIPAL)
+    # ==================================================
+    st.markdown("### 👥 Selección de Técnicos Integrales")
+
+    tecnicos = sorted(df["TECNICOS INTEGRALES"].dropna().astype(str).unique())
+
+    tecnicos_sel = st.multiselect(
+        "Técnicos Integrales",
+        tecnicos,
+        default=tecnicos,
+        help="Puedes escribir para buscar un técnico específico"
+    )
+
+    st.divider()
+
+    # ==================================================
     # LIMPIAR DEUDA
-    # ==============================
+    # ==================================================
     df["_deuda_num"] = (
         df["DEUDA TOTAL"]
         .astype(str)
@@ -86,9 +91,9 @@ if archivo:
 
     df["_deuda_num"] = pd.to_numeric(df["_deuda_num"], errors="coerce").fillna(0)
 
-    # ==============================
+    # ==================================================
     # APLICAR FILTROS
-    # ==============================
+    # ==================================================
     df_filtrado = df[
         (df["RANGO_EDAD"].astype(str).isin(rangos_sel)) &
         (df[col_sub].astype(str).isin(sub_sel)) &
@@ -120,14 +125,14 @@ if archivo:
                 df_filtrado[col], errors="coerce"
             ).dt.strftime("%d-%m-%Y")
 
-    # ==============================
-    # PESTAÑAS PRINCIPALES
-    # ==============================
-    tab1, tab2 = st.tabs(["📋 Tabla", "📊 Dashboard"])
+    # ==================================================
+    # TABS PRINCIPALES
+    # ==================================================
+    tab1, tab2 = st.tabs(["📋 Tabla", "📊 Dashboard Ejecutivo"])
 
-    # ==============================
+    # ==================================================
     # TABLA
-    # ==============================
+    # ==================================================
     with tab1:
 
         st.subheader("Resultado Final")
@@ -148,12 +153,12 @@ if archivo:
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
             )
 
-    # ==============================
-    # DASHBOARD
-    # ==============================
+    # ==================================================
+    # DASHBOARD EJECUTIVO
+    # ==================================================
     with tab2:
 
-        st.subheader("📊 Indicadores Generales")
+        st.subheader("📊 Indicadores Clave")
 
         colA, colB, colC = st.columns(3)
 
