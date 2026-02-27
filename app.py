@@ -76,7 +76,7 @@ if archivo:
         st.experimental_rerun()
 
     # ==================================================
-    # LIMPIAR DEUDA
+    # LIMPIAR DEUDA PARA CALCULOS
     # ==================================================
     df["_deuda_num"] = (
         df["DEUDA TOTAL"]
@@ -112,7 +112,7 @@ if archivo:
     )
 
     # ==================================================
-    # FORMATEAR COLUMNAS DE FECHA (SIN HORA)
+    # FORMATEAR FECHAS
     # ==================================================
     columnas_fecha = [
         "FECHA_VENCIMIENTO",
@@ -126,6 +126,36 @@ if archivo:
                 df_filtrado[col],
                 errors="coerce"
             ).dt.strftime("%d/%m/%Y")
+
+    # ==================================================
+    # FORMATEAR MONEDAS
+    # ==================================================
+    columnas_moneda = [
+        "ULT_PAGO",
+        "VALOR_ULTIMA_FACTURA",
+        "DEUDA TOTAL"
+    ]
+
+    for col in columnas_moneda:
+        if col in df_filtrado.columns:
+
+            df_filtrado[col] = (
+                df_filtrado[col]
+                .astype(str)
+                .str.replace("$", "", regex=False)
+                .str.replace(",", "", regex=False)
+                .str.replace(".", "", regex=False)
+                .str.strip()
+            )
+
+            df_filtrado[col] = pd.to_numeric(
+                df_filtrado[col],
+                errors="coerce"
+            ).fillna(0)
+
+            df_filtrado[col] = df_filtrado[col].apply(
+                lambda x: f"$ {x:,.0f}"
+            )
 
     # ==================================================
     # TABS
@@ -169,7 +199,7 @@ if archivo:
         col1, col2, col3 = st.columns(3)
 
         col1.metric("Total Pólizas", total_polizas)
-        col2.metric("Total Deuda", f"${total_deuda:,.0f}")
+        col2.metric("Total Deuda", f"$ {total_deuda:,.0f}")
         col3.metric("Técnicos Activos", tecnicos_activos)
 
         st.divider()
@@ -189,7 +219,7 @@ if archivo:
         )
 
         top10.columns = ["Técnico Integral", "Total Deuda"]
-        top10["Total Deuda"] = top10["Total Deuda"].apply(lambda x: f"${x:,.0f}")
+        top10["Total Deuda"] = top10["Total Deuda"].apply(lambda x: f"$ {x:,.0f}")
 
         st.dataframe(top10, use_container_width=True)
 
