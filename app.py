@@ -39,25 +39,35 @@ if archivo:
         st.stop()
 
     # ==============================
-    # FILTROS
+    # PANEL LATERAL (FILTROS)
     # ==============================
+    st.sidebar.header("🎯 Filtros")
+
     rangos = sorted(df["RANGO_EDAD"].dropna().astype(str).unique())
     subcategorias = sorted(df[col_sub].dropna().astype(str).unique())
     tecnicos = sorted(df["TECNICOS INTEGRALES"].dropna().astype(str).unique())
 
-    col1, col2, col3 = st.columns(3)
+    rangos_sel = st.sidebar.multiselect(
+        "Rango Edad",
+        rangos,
+        default=rangos
+    )
 
-    with col1:
-        rangos_sel = st.multiselect("Rango Edad", rangos, default=rangos)
+    sub_sel = st.sidebar.multiselect(
+        "Subcategoría",
+        subcategorias,
+        default=subcategorias
+    )
 
-    with col2:
-        sub_sel = st.multiselect("Subcategoría", subcategorias, default=subcategorias)
+    tecnicos_sel = st.sidebar.multiselect(
+        "Técnicos Integrales",
+        tecnicos,
+        default=tecnicos,
+        help="Escribe para buscar un técnico específico"
+    )
 
-    with col3:
-        tecnicos_sel = st.multiselect("Técnicos", tecnicos, default=tecnicos)
-
-    deuda_minima = st.number_input(
-        "Filtrar deudas mayores a:",
+    deuda_minima = st.sidebar.number_input(
+        "Deudas mayores a:",
         min_value=0,
         value=100000,
         step=50000
@@ -110,14 +120,14 @@ if archivo:
                 df_filtrado[col], errors="coerce"
             ).dt.strftime("%d-%m-%Y")
 
-    # ==========================================
-    # PESTAÑAS
-    # ==========================================
-    tab1, tab2 = st.tabs(["📋 Tabla y Descarga", "📊 Dashboard"])
+    # ==============================
+    # PESTAÑAS PRINCIPALES
+    # ==============================
+    tab1, tab2 = st.tabs(["📋 Tabla", "📊 Dashboard"])
 
-    # ==========================================
+    # ==============================
     # TABLA
-    # ==========================================
+    # ==============================
     with tab1:
 
         st.subheader("Resultado Final")
@@ -138,9 +148,9 @@ if archivo:
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
             )
 
-    # ==========================================
+    # ==============================
     # DASHBOARD
-    # ==========================================
+    # ==============================
     with tab2:
 
         st.subheader("📊 Indicadores Generales")
@@ -153,9 +163,7 @@ if archivo:
 
         st.divider()
 
-        # ------------------------------
-        # GRAFICO SUBCATEGORIA
-        # ------------------------------
+        # Gráfico Subcategoría
         conteo_sub = df_filtrado[col_sub].value_counts().reset_index()
         conteo_sub.columns = ["Subcategoría", "Cantidad"]
 
@@ -169,9 +177,7 @@ if archivo:
 
         st.plotly_chart(fig1, use_container_width=True)
 
-        # ------------------------------
-        # GRAFICO RANGO EDAD
-        # ------------------------------
+        # Gráfico Rango Edad
         conteo_edad = df_filtrado["RANGO_EDAD"].value_counts().reset_index()
         conteo_edad.columns = ["Rango Edad", "Cantidad"]
 
