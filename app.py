@@ -1,246 +1,201 @@
 import streamlit as st
 import pandas as pd
 import io
-import plotly.express as px
+from datetime import datetime
 
-st.set_page_config(page_title="Dashboard Ejecutivo UT", layout="wide")
+# Configuración de la página
+st.set_page_config(page_title="Sistema de Gestión UT", layout="wide")
 
-st.title("📊 Dashboard Ejecutivo - Seguimiento Unidad de Trabajo")
+# ==================================================
+# 1. PERSISTENCIA DE DATOS (Session State)
+# ==================================================
+if 'db_materiales_operarios' not in st.session_state:
+    # Movimientos: INICIAL, BODEGA (Suma) y ACTA (Resta)
+    st.session_state.db_materiales_operarios = pd.DataFrame(
+        columns=["Fecha", "Tipo_Movimiento", "Operario", "Material", "Cantidad", "Referencia/Acta"]
+    )
 
-archivo = st.file_uploader("Sube el archivo Excel", type=["xlsx"])
+if 'db_materiales_bodega' not in st.session_state:
+    st.session_state.db_materiales_bodega = pd.DataFrame(columns=["Fecha", "Material", "Cantidad", "Origen"])
 
-if archivo:
+if 'db_herramientas_operarios' not in st.session_state:
+    st.session_state.db_herramientas_operarios = pd.DataFrame(columns=["Fecha", "Operario", "Herramienta", "Cantidad", "ID_Serie"])
 
-    df = pd.read_excel(archivo)
-    df.columns = df.columns.str.strip()
+# Catálogos
+if 'cat_materiales' not in st.session_state: st.session_state.cat_materiales = []
+if 'cat_herramientas' not in st.session_state: st.session_state.cat_herramientas = []
+if 'cat_operarios' not in st.session_state: st.session_state.cat_operarios = []
 
-    # ==================================================
-    # DETECTAR SUBCATEGORIA
-    # ==================================================
-    columnas_normalizadas = {col.lower(): col for col in df.columns}
+# ==================================================
+# 2. FUNCIONES DE CÁLCULO
+# ==================================================
+def convertir_a_csv(df):
+    return df.to_csv(index=False).encode('utf-8')
 
-    if "subcategoría" in columnas_normalizadas:
-        col_sub = columnas_normalizadas["subcategoría"]
-    elif "subcategoria" in columnas_normalizadas:
-        col_sub = columnas_normalizadas["subcategoria"]
+def obtener_stock_real_operarios():
+    if st.session_state.db_materiales_operarios.empty:
+        return pd.DataFrame(columns=["Operario", "Material", "Stock Actual"])
+    
+    df = st.session_state.db_materiales_operarios.copy()
+    # Los movimientos tipo ACTA restan, los demás suman
+    df['Cantidad_Neta'] = df.apply(lambda x: -x['Cantidad'] if x['Tipo_Movimiento'] == "ACTA" else x['Cantidad'], axis=1)
+    
+    resumen = df.groupby(["Operario", "Material"])["Cantidad_Neta"].sum().reset_index()
+    resumen.rename(columns={"Cantidad_Neta": "Stock Actual"}, inplace=True)
+    return resumen
+
+# ==================================================
+# 3. BARRA LATERAL (CONFIGURACIÓN)
+# ==================================================
+with st.sidebar:
+    st.header("⚙️ Configuración")
+    
+    op_input = st.text_input("Añadir Operario")
+    if st.button("Registrar Operario") and op_input:
+        nombre = op_input.strip().upper()
+        if nombre not in st.session_state.cat_operarios:
+            st.session_state.cat_operarios.append(nombre)
+            st.rerun()
+
+    mat_input = st.text_input("Añadir Material")
+    if st.button("Registrar Material") and mat_input:
+        nombre = mat_input.strip().upper()
+        if nombre not in st.session_state.cat_materiales:
+            st.session_state.cat_materiales.append(nombre)
+            st.rerun()
+
+    herr_input = st.text_input("Añadir Herramienta")
+    if st.button("Registrar Herramienta") and herr_input:
+        nombre = herr_input.strip().upper()
+        if nombre not in st.session_state.cat_herramientas:
+            st.session_state.cat_herramientas.append(nombre)
+            st.rerun()
+
+    st.divider()
+    if st.button("🚨 Reiniciar Sistema"):
+        st.session_state.clear()
+        st.rerun()
+
+# ==================================================
+# 4. CUERPO PRINCIPAL
+# ==================================================
+st.title("🛡️ Control de Inventario y Actas de Operarios")
+
+tab_resumen, tab_inicial, tab_actas, tab_bodega, tab_herr = st.tabs([
+    "📊 Resumen de Stock", 
+    "📥 Carga Inicial", 
+    "📄 Consumo (Actas)", 
+    "🏢 Bodega", 
+    "🛠️ Herramientas"
+])
+
+# --- TAB: RESUMEN (STOCK ACTUAL EN CALLE) ---
+with tab_resumen:
+    st.subheader("Estado Actual de Materiales por Operario")
+    df_resumen = obtener_stock_real_operarios()
+    if not df_resumen.empty:
+        st.dataframe(df_resumen, use_container_width=True, hide_index=True)
+        st.download_button("📥 Descargar Inventario Calle (CSV)", convertir_a_csv(df_resumen), "stock_operarios.csv")
     else:
-        st.error("No existe columna Subcategoría")
-        st.stop()
+        st.info("No hay materiales asignados.")
 
-    columnas_obligatorias = ["RANGO_EDAD", "TECNICOS INTEGRALES", "DEUDA TOTAL"]
-    for col in columnas_obligatorias:
-        if col not in df.columns:
-            st.error(f"No existe columna {col}")
-            st.stop()
+# --- TAB: CARGA INICIAL ---
+with tab_inicial:
+    st.subheader("Registrar Inventario Inicial del Operario")
+    with st.form("form_inicial", clear_on_submit=True):
+        col1, col2 = st.columns(2)
+        op_i = col1.selectbox("Operario", st.session_state.cat_operarios, key="op_i")
+        mat_i = col1.selectbox("Material", st.session_state.cat_materiales, key="mat_i")
+        cant_i = col2.number_input("Cantidad Inicial", min_value=1, step=1)
+        ref_i = col2.text_input("Referencia (Opcional)", "Inventario Inicial")
+        
+        if st.form_submit_button("Cargar Stock Inicial"):
+            nueva_fila = pd.DataFrame([[datetime.now().date(), "INICIAL", op_i, mat_i, cant_i, ref_i]], 
+                                     columns=st.session_state.db_materiales_operarios.columns)
+            st.session_state.db_materiales_operarios = pd.concat([st.session_state.db_materiales_operarios, nueva_fila], ignore_index=True)
+            st.success("Cargado con éxito")
+            st.rerun()
 
-    # ==================================================
-    # SIDEBAR FILTROS
-    # ==================================================
-    st.sidebar.header("🎯 Filtros")
+# --- TAB: ACTAS (RESTAR MATERIAL) ---
+with tab_actas:
+    st.subheader("📄 Registro de Consumo por Acta")
+    st.write("Utilice esta sección para restar el material que el operario ya instaló o utilizó.")
+    
+    df_val = obtener_stock_real_operarios()
+    
+    with st.form("form_acta", clear_on_submit=True):
+        c1, c2 = st.columns(2)
+        op_a = c1.selectbox("Operario que reporta", st.session_state.cat_operarios)
+        
+        # Filtrar materiales que realmente tiene el operario
+        mats_op = df_val[df_val["Operario"] == op_a]["Material"].unique()
+        mat_a = c1.selectbox("Material utilizado", mats_op if len(mats_op)>0 else ["Sin stock"])
+        
+        # Mostrar cuánto tiene antes de restar
+        if len(mats_op) > 0:
+            actual = df_val[(df_val["Operario"] == op_a) & (df_val["Material"] == mat_a)]["Stock Actual"].values[0]
+            c1.info(f"Stock actual del operario: {int(actual)}")
+        
+        cant_a = c2.number_input("Cantidad utilizada (A restar)", min_value=1, step=1)
+        num_acta = c2.text_input("Número de Acta / Orden")
+        
+        if st.form_submit_button("🔥 Registrar Consumo (Restar)"):
+            if len(mats_op) == 0:
+                st.error("El operario no tiene materiales asignados.")
+            elif cant_a > actual:
+                st.error(f"Error: El operario solo tiene {int(actual)} unidades.")
+            else:
+                nueva_acta = pd.DataFrame([[datetime.now().date(), "ACTA", op_a, mat_a, cant_a, num_acta]], 
+                                         columns=st.session_state.db_materiales_operarios.columns)
+                st.session_state.db_materiales_operarios = pd.concat([st.session_state.db_materiales_operarios, nueva_acta], ignore_index=True)
+                st.success(f"Se restaron {cant_a} unidades a {op_a} por el acta {num_acta}")
+                st.rerun()
 
-    rangos = sorted(df["RANGO_EDAD"].dropna().astype(str).unique())
-    subcategorias = sorted(df[col_sub].dropna().astype(str).unique())
-    tecnicos = sorted(df["TECNICOS INTEGRALES"].dropna().astype(str).unique())
+# --- TAB: BODEGA ---
+with tab_bodega:
+    st.subheader("Movimientos de Bodega Central")
+    col_b1, col_b2 = st.columns(2)
+    
+    with col_b1:
+        st.write("**Entrada a Bodega**")
+        with st.form("b_ent"):
+            m_b = st.selectbox("Material", st.session_state.cat_materiales)
+            c_b = st.number_input("Cantidad", min_value=1)
+            if st.form_submit_button("Ingresar"):
+                st.session_state.db_materiales_bodega = pd.concat([st.session_state.db_materiales_bodega, 
+                    pd.DataFrame([[datetime.now().date(), m_b, c_b, "Compra/Ingreso"]], columns=st.session_state.db_materiales_bodega.columns)], ignore_index=True)
+                st.rerun()
 
-    rangos_sel = st.sidebar.multiselect("Rango Edad", rangos, default=rangos)
-    sub_sel = st.sidebar.multiselect("Subcategoría", subcategorias, default=subcategorias)
+    with col_b2:
+        st.write("**Entrega Bodega -> Operario**")
+        with st.form("b_sal"):
+            op_d = st.selectbox("Operario Destino", st.session_state.cat_operarios)
+            mat_d = st.selectbox("Material", st.session_state.cat_materiales)
+            cant_d = st.number_input("Cantidad", min_value=1)
+            if st.form_submit_button("Entregar"):
+                # Sumar al operario
+                nueva_ent = pd.DataFrame([[datetime.now().date(), "BODEGA", op_d, mat_d, cant_d, "Entrega Bodega"]], 
+                                         columns=st.session_state.db_materiales_operarios.columns)
+                st.session_state.db_materiales_operarios = pd.concat([st.session_state.db_materiales_operarios, nueva_ent], ignore_index=True)
+                # Restar de bodega
+                nueva_rest = pd.DataFrame([[datetime.now().date(), mat_d, -cant_d, f"Salida a {op_d}"]], 
+                                          columns=st.session_state.db_materiales_bodega.columns)
+                st.session_state.db_materiales_bodega = pd.concat([st.session_state.db_materiales_bodega, nueva_rest], ignore_index=True)
+                st.success("Entrega registrada")
+                st.rerun()
 
-    deuda_minima = st.sidebar.number_input(
-        "Deudas mayores a:",
-        min_value=0,
-        value=100000,
-        step=50000
-    )
-
-    # ==================================================
-    # FILTRO INTELIGENTE TECNICOS
-    # ==================================================
-    st.sidebar.subheader("👥 Técnicos Integrales")
-
-    modo_exclusion = st.sidebar.checkbox("🧠 Seleccionar todos excepto...")
-
-    if modo_exclusion:
-        tecnicos_excluir = st.sidebar.multiselect("🚫 Técnicos a excluir", tecnicos)
-        tecnicos_final = [t for t in tecnicos if t not in tecnicos_excluir]
-    else:
-        tecnicos_final = st.sidebar.multiselect(
-            "✅ Técnicos a incluir",
-            tecnicos,
-            default=tecnicos
-        )
-
-    st.sidebar.markdown("---")
-    st.sidebar.markdown(f"📊 **Técnicos activos:** {len(tecnicos_final)}")
-
-    if st.sidebar.button("⚡ Limpiar filtros"):
-        st.experimental_rerun()
-
-    # ==================================================
-    # LIMPIAR DEUDA
-    # ==================================================
-    df["_deuda_num"] = (
-        df["DEUDA TOTAL"]
-        .astype(str)
-        .str.replace("$", "", regex=False)
-        .str.replace(",", "", regex=False)
-        .str.replace(".", "", regex=False)
-        .str.strip()
-    )
-
-    df["_deuda_num"] = pd.to_numeric(df["_deuda_num"], errors="coerce").fillna(0)
-
-    # ==================================================
-    # FILTRAR
-    # ==================================================
-    df_filtrado = df[
-        (df["RANGO_EDAD"].astype(str).isin(rangos_sel)) &
-        (df[col_sub].astype(str).isin(sub_sel)) &
-        (df["_deuda_num"] >= deuda_minima) &
-        (df["TECNICOS INTEGRALES"].astype(str).isin(tecnicos_final))
-    ].copy()
-
-    df_filtrado = df_filtrado.sort_values(by="_deuda_num", ascending=False)
-
-    # ==================================================
-    # LIMITE 50 POLIZAS POR TECNICO
-    # ==================================================
-    df_filtrado = (
-        df_filtrado
-        .groupby("TECNICOS INTEGRALES")
-        .head(50)
-        .reset_index(drop=True)
-    )
-
-    # ==================================================
-    # FORMATEAR COLUMNAS DE FECHA (SIN HORA)
-    # ==================================================
-    columnas_fecha = [
-        "FECHA_VENCIMIENTO",
-        "ULT_FECHA_PAGO",
-        "FECHA DE ASIGNACION"
-    ]
-
-    for col in columnas_fecha:
-        if col in df_filtrado.columns:
-            df_filtrado[col] = pd.to_datetime(
-                df_filtrado[col],
-                errors="coerce"
-            ).dt.strftime("%d/%m/%Y")
-
-    # ==================================================
-    # TABS
-    # ==================================================
-    tab1, tab2 = st.tabs(["📋 Tabla", "📊 Dashboard Ejecutivo"])
-
-    # ==================================================
-    # TABLA
-    # ==================================================
-    with tab1:
-
-        st.subheader("Resultado Final")
-        st.success(f"Total pólizas: {len(df_filtrado)}")
-
-        st.dataframe(df_filtrado, use_container_width=True)
-
-        if not df_filtrado.empty:
-            output = io.BytesIO()
-            df_export = df_filtrado.drop(columns=["_deuda_num"], errors="ignore")
-            df_export.to_excel(output, index=False, engine="openpyxl")
-            output.seek(0)
-
-            st.download_button(
-                "📥 Descargar archivo",
-                data=output,
-                file_name="resultado_filtrado.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-            )
-
-    # ==================================================
-    # DASHBOARD
-    # ==================================================
-    with tab2:
-
-        st.subheader("📊 Indicadores Clave")
-
-        total_polizas = len(df_filtrado)
-        total_deuda = df_filtrado["_deuda_num"].sum()
-        tecnicos_activos = df_filtrado["TECNICOS INTEGRALES"].nunique()
-
-        col1, col2, col3 = st.columns(3)
-
-        col1.metric("Total Pólizas", total_polizas)
-        col2.metric("Total Deuda", f"${total_deuda:,.0f}")
-        col3.metric("Técnicos Activos", tecnicos_activos)
-
-        st.divider()
-
-        # ==================================================
-        # TOP 10 EN TABLA
-        # ==================================================
-        st.subheader("🏆 Top 10 Técnicos con Mayor Deuda")
-
-        top10 = (
-            df_filtrado
-            .groupby("TECNICOS INTEGRALES")["_deuda_num"]
-            .sum()
-            .sort_values(ascending=False)
-            .head(10)
-            .reset_index()
-        )
-
-        top10.columns = ["Técnico Integral", "Total Deuda"]
-        top10["Total Deuda"] = top10["Total Deuda"].apply(lambda x: f"${x:,.0f}")
-
-        st.dataframe(top10, use_container_width=True)
-
-        # ==================================================
-        # SUBCATEGORIA
-        # ==================================================
-        st.subheader("🥧 Distribución por Subcategoría")
-
-        conteo_sub = df_filtrado[col_sub].value_counts().reset_index()
-        conteo_sub.columns = ["Subcategoría", "Cantidad"]
-
-        fig_pie = px.pie(conteo_sub, names="Subcategoría", values="Cantidad")
-        st.plotly_chart(fig_pie, use_container_width=True)
-
-        # ==================================================
-        # RANGO EDAD ORDEN PERSONALIZADO
-        # ==================================================
-        st.subheader("📊 Pólizas por Rango de Edad")
-
-        df_filtrado["RANGO_EDAD"] = (
-            df_filtrado["RANGO_EDAD"]
-            .astype(str)
-            .str.strip()
-            .str.replace(" ", "", regex=False)
-        )
-
-        orden_personalizado = [
-            "0-30",
-            "31-60",
-            "61-90",
-            "91-120",
-            "121-360",
-            "361-1080",
-            ">1080"
-        ]
-
-        conteo_real = df_filtrado["RANGO_EDAD"].value_counts()
-
-        conteo_edad = pd.DataFrame({
-            "Rango Edad": orden_personalizado,
-            "Cantidad": [conteo_real.get(rango, 0) for rango in orden_personalizado]
-        })
-
-        fig_edad = px.bar(
-            conteo_edad,
-            x="Rango Edad",
-            y="Cantidad",
-            text_auto=True
-        )
-
-        st.plotly_chart(fig_edad, use_container_width=True)
-
-else:
-    st.info("👆 Sube un archivo para comenzar.")
+# --- TAB: HERRAMIENTAS ---
+with tab_herr:
+    st.subheader("Asignación de Herramientas")
+    with st.form("f_herr"):
+        op_h = st.selectbox("Operario", st.session_state.cat_operarios)
+        her_h = st.selectbox("Herramienta", st.session_state.cat_herramientas)
+        can_h = st.number_input("Cantidad", min_value=1, value=1)
+        ser_h = st.text_input("Número de Serie")
+        if st.form_submit_button("🛠️ Asignar Herramienta"):
+            st.session_state.db_herramientas_operarios = pd.concat([st.session_state.db_herramientas_operarios, 
+                pd.DataFrame([[datetime.now().date(), op_h, her_h, can_h, ser_h]], columns=st.session_state.db_herramientas_operarios.columns)], ignore_index=True)
+            st.success("Asignada")
+            st.rerun()
+    
+    st.dataframe(st.session_state.db_herramientas_operarios, use_container_width=True)
