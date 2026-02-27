@@ -84,7 +84,6 @@ if archivo:
         .str.replace("$", "", regex=False)
         .str.replace(",", "", regex=False)
         .str.replace(".", "", regex=False)
-        .str.strip()
     )
 
     df["_deuda_num"] = pd.to_numeric(df["_deuda_num"], errors="coerce").fillna(0)
@@ -101,31 +100,13 @@ if archivo:
 
     df_filtrado = df_filtrado.sort_values(by="_deuda_num", ascending=False)
 
-    # ==================================================
     # LIMITE 50 POLIZAS POR TECNICO
-    # ==================================================
     df_filtrado = (
         df_filtrado
         .groupby("TECNICOS INTEGRALES")
         .head(50)
         .reset_index(drop=True)
     )
-
-    # ==================================================
-    # FORMATEAR COLUMNAS DE FECHA (SIN HORA)
-    # ==================================================
-    columnas_fecha = [
-        "FECHA_VENCIMIENTO",
-        "ULT_FECHA_PAGO",
-        "FECHA DE ASIGNACION"
-    ]
-
-    for col in columnas_fecha:
-        if col in df_filtrado.columns:
-            df_filtrado[col] = pd.to_datetime(
-                df_filtrado[col],
-                errors="coerce"
-            ).dt.strftime("%d/%m/%Y")
 
     # ==================================================
     # TABS
@@ -209,13 +190,6 @@ if archivo:
         # ==================================================
         st.subheader("📊 Pólizas por Rango de Edad")
 
-        df_filtrado["RANGO_EDAD"] = (
-            df_filtrado["RANGO_EDAD"]
-            .astype(str)
-            .str.strip()
-            .str.replace(" ", "", regex=False)
-        )
-
         orden_personalizado = [
             "0-30",
             "31-60",
@@ -226,12 +200,14 @@ if archivo:
             ">1080"
         ]
 
-        conteo_real = df_filtrado["RANGO_EDAD"].value_counts()
+        conteo_edad = (
+            df_filtrado["RANGO_EDAD"]
+            .value_counts()
+            .reindex(orden_personalizado, fill_value=0)
+            .reset_index()
+        )
 
-        conteo_edad = pd.DataFrame({
-            "Rango Edad": orden_personalizado,
-            "Cantidad": [conteo_real.get(rango, 0) for rango in orden_personalizado]
-        })
+        conteo_edad.columns = ["Rango Edad", "Cantidad"]
 
         fig_edad = px.bar(
             conteo_edad,
