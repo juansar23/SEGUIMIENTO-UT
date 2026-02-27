@@ -1,7 +1,7 @@
 import streamlit as st
 import pandas as pd
 import io
-import matplotlib.pyplot as plt
+import plotly.express as px
 
 st.set_page_config(page_title="Seguimiento UT", layout="wide")
 
@@ -14,9 +14,9 @@ if archivo:
     df = pd.read_excel(archivo)
     df.columns = df.columns.str.strip()
 
-    # ---------------------------------
-    # DETECTAR COLUMNA SUBCATEGORIA
-    # ---------------------------------
+    # ==============================
+    # DETECTAR SUBCATEGORIA
+    # ==============================
     columnas_normalizadas = {col.lower(): col for col in df.columns}
 
     if "subcategoría" in columnas_normalizadas:
@@ -24,88 +24,38 @@ if archivo:
     elif "subcategoria" in columnas_normalizadas:
         col_sub = columnas_normalizadas["subcategoria"]
     else:
-        st.error("❌ No existe columna Subcategoría")
+        st.error("No existe columna Subcategoría")
         st.stop()
 
-    # ---------------------------------
-    # VALIDAR COLUMNAS NECESARIAS
-    # ---------------------------------
+    # ==============================
+    # VALIDAR COLUMNAS
+    # ==============================
     if "RANGO_EDAD" not in df.columns:
-        st.error("❌ No existe columna RANGO_EDAD")
+        st.error("No existe columna RANGO_EDAD")
         st.stop()
 
     if "TECNICOS INTEGRALES" not in df.columns:
-        st.error("❌ No existe columna TECNICOS INTEGRALES")
+        st.error("No existe columna TECNICOS INTEGRALES")
         st.stop()
 
-    # ---------------------------------
-    # FILTRO RANGO EDAD
-    # ---------------------------------
-    rangos_disponibles = sorted(
-        df["RANGO_EDAD"]
-        .dropna()
-        .astype(str)
-        .str.strip()
-        .unique()
-    )
+    # ==============================
+    # FILTROS
+    # ==============================
+    rangos = sorted(df["RANGO_EDAD"].dropna().astype(str).unique())
+    subcategorias = sorted(df[col_sub].dropna().astype(str).unique())
+    tecnicos = sorted(df["TECNICOS INTEGRALES"].dropna().astype(str).unique())
 
-    rangos_seleccionados = st.multiselect(
-        "Seleccione Rangos de Edad:",
-        rangos_disponibles,
-        default=rangos_disponibles
-    )
+    col1, col2, col3 = st.columns(3)
 
-    # ---------------------------------
-    # FILTRO SUBCATEGORIA
-    # ---------------------------------
-    subcategorias_disponibles = sorted(
-        df[col_sub]
-        .dropna()
-        .astype(str)
-        .str.strip()
-        .unique()
-    )
+    with col1:
+        rangos_sel = st.multiselect("Rango Edad", rangos, default=rangos)
 
-    subcategorias_seleccionadas = st.multiselect(
-        "Seleccione Subcategorías:",
-        subcategorias_disponibles,
-        default=subcategorias_disponibles
-    )
+    with col2:
+        sub_sel = st.multiselect("Subcategoría", subcategorias, default=subcategorias)
 
-    # ---------------------------------
-    # FILTRO TECNICOS
-    # ---------------------------------
-    tecnicos_disponibles = sorted(
-        df["TECNICOS INTEGRALES"]
-        .dropna()
-        .astype(str)
-        .str.strip()
-        .unique()
-    )
+    with col3:
+        tecnicos_sel = st.multiselect("Técnicos", tecnicos, default=tecnicos)
 
-    tecnicos_seleccionados = st.multiselect(
-        "Seleccione Técnicos Integrales:",
-        tecnicos_disponibles,
-        default=tecnicos_disponibles
-    )
-
-    # ---------------------------------
-    # CONVERTIR DEUDA TOTAL A NUMERO
-    # ---------------------------------
-    df["_deuda_num"] = (
-        df["DEUDA TOTAL"]
-        .astype(str)
-        .str.replace("$", "", regex=False)
-        .str.replace(",", "", regex=False)
-        .str.replace(".", "", regex=False)
-        .str.strip()
-    )
-
-    df["_deuda_num"] = pd.to_numeric(df["_deuda_num"], errors="coerce").fillna(0)
-
-    # ---------------------------------
-    # FILTRO DEUDA MINIMA
-    # ---------------------------------
     deuda_minima = st.number_input(
         "Filtrar deudas mayores a:",
         min_value=0,
@@ -113,13 +63,26 @@ if archivo:
         step=50000
     )
 
-    # ---------------------------------
+    # ==============================
+    # LIMPIAR DEUDA
+    # ==============================
+    df["_deuda_num"] = (
+        df["DEUDA TOTAL"]
+        .astype(str)
+        .str.replace("$", "", regex=False)
+        .str.replace(",", "", regex=False)
+        .str.replace(".", "", regex=False)
+    )
+
+    df["_deuda_num"] = pd.to_numeric(df["_deuda_num"], errors="coerce").fillna(0)
+
+    # ==============================
     # APLICAR FILTROS
-    # ---------------------------------
+    # ==============================
     df_filtrado = df[
-        (df["RANGO_EDAD"].astype(str).isin(rangos_seleccionados)) &
-        (df[col_sub].astype(str).isin(subcategorias_seleccionadas)) &
-        (df["TECNICOS INTEGRALES"].astype(str).isin(tecnicos_seleccionados)) &
+        (df["RANGO_EDAD"].astype(str).isin(rangos_sel)) &
+        (df[col_sub].astype(str).isin(sub_sel)) &
+        (df["TECNICOS INTEGRALES"].astype(str).isin(tecnicos_sel)) &
         (df["_deuda_num"] >= deuda_minima)
     ].copy()
 
@@ -134,9 +97,7 @@ if archivo:
         .reset_index(drop=True)
     )
 
-    # ---------------------------------
-    # FORMATO FECHA CORTA
-    # ---------------------------------
+    # Formato fecha corta
     columnas_fecha = [
         "FECHA_VENCIMIENTO",
         "ULT_FECHA_PAGO",
@@ -149,61 +110,80 @@ if archivo:
                 df_filtrado[col], errors="coerce"
             ).dt.strftime("%d-%m-%Y")
 
-    df_filtrado = df_filtrado.drop(columns=["_deuda_num"])
+    # ==========================================
+    # PESTAÑAS
+    # ==========================================
+    tab1, tab2 = st.tabs(["📋 Tabla y Descarga", "📊 Dashboard"])
 
-    # ---------------------------------
-    # MOSTRAR TABLA FINAL
-    # ---------------------------------
-    st.success(f"Registros finales: {len(df_filtrado)}")
-    st.dataframe(df_filtrado, use_container_width=True)
+    # ==========================================
+    # TABLA
+    # ==========================================
+    with tab1:
 
-    # =================================
-    # 📊 GRAFICA 1: POLIZAS POR SUBCATEGORIA
-    # =================================
-    st.subheader("📊 Pólizas por Subcategoría")
+        st.subheader("Resultado Final")
+        st.success(f"Total pólizas: {len(df_filtrado)}")
 
-    conteo_sub = df_filtrado[col_sub].value_counts()
+        st.dataframe(df_filtrado, use_container_width=True)
 
-    fig1, ax1 = plt.subplots()
-    conteo_sub.plot(kind="bar", ax=ax1)
-    ax1.set_ylabel("Cantidad de Pólizas")
-    ax1.set_xlabel("Subcategoría")
-    ax1.set_title("Cantidad de Pólizas por Subcategoría")
-    plt.xticks(rotation=45)
+        if not df_filtrado.empty:
+            output = io.BytesIO()
+            df_filtrado.drop(columns=["_deuda_num"], errors="ignore") \
+                .to_excel(output, index=False, engine="openpyxl")
+            output.seek(0)
 
-    st.pyplot(fig1)
+            st.download_button(
+                "📥 Descargar archivo",
+                data=output,
+                file_name="resultado_filtrado.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            )
 
-    # =================================
-    # 📊 GRAFICA 2: POLIZAS POR RANGO EDAD
-    # =================================
-    st.subheader("📊 Pólizas por Rango de Edad")
+    # ==========================================
+    # DASHBOARD
+    # ==========================================
+    with tab2:
 
-    conteo_edad = df_filtrado["RANGO_EDAD"].value_counts()
+        st.subheader("📊 Indicadores Generales")
 
-    fig2, ax2 = plt.subplots()
-    conteo_edad.plot(kind="bar", ax=ax2)
-    ax2.set_ylabel("Cantidad de Pólizas")
-    ax2.set_xlabel("Rango de Edad")
-    ax2.set_title("Cantidad de Pólizas por Rango de Edad")
-    plt.xticks(rotation=45)
+        colA, colB, colC = st.columns(3)
 
-    st.pyplot(fig2)
+        colA.metric("Total Pólizas", len(df_filtrado))
+        colB.metric("Total Deuda", f"${df_filtrado['_deuda_num'].sum():,.0f}")
+        colC.metric("Técnicos Activos", df_filtrado["TECNICOS INTEGRALES"].nunique())
 
-    # ---------------------------------
-    # BOTON DESCARGAR
-    # ---------------------------------
-    if not df_filtrado.empty:
+        st.divider()
 
-        output = io.BytesIO()
-        df_filtrado.to_excel(output, index=False, engine="openpyxl")
-        output.seek(0)
+        # ------------------------------
+        # GRAFICO SUBCATEGORIA
+        # ------------------------------
+        conteo_sub = df_filtrado[col_sub].value_counts().reset_index()
+        conteo_sub.columns = ["Subcategoría", "Cantidad"]
 
-        st.download_button(
-            label="📥 Descargar archivo filtrado",
-            data=output,
-            file_name="resultado_filtrado.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        fig1 = px.bar(
+            conteo_sub,
+            x="Subcategoría",
+            y="Cantidad",
+            title="Pólizas por Subcategoría",
+            text_auto=True
         )
+
+        st.plotly_chart(fig1, use_container_width=True)
+
+        # ------------------------------
+        # GRAFICO RANGO EDAD
+        # ------------------------------
+        conteo_edad = df_filtrado["RANGO_EDAD"].value_counts().reset_index()
+        conteo_edad.columns = ["Rango Edad", "Cantidad"]
+
+        fig2 = px.bar(
+            conteo_edad,
+            x="Rango Edad",
+            y="Cantidad",
+            title="Pólizas por Rango de Edad",
+            text_auto=True
+        )
+
+        st.plotly_chart(fig2, use_container_width=True)
 
 else:
     st.info("Sube un archivo para comenzar.")
