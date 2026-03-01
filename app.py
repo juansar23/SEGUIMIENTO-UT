@@ -164,50 +164,63 @@ if archivo:
     # =====================================================
     with tab3:
 
-        st.subheader("🧑‍💼 Asignación Supervisores")
+    st.subheader("🧑‍💼 Asignación Supervisores")
 
-        SUPERVISORES_FIJOS = [
-            "FAVIO ERNESTO VASQUEZ ROMERO",
-            "DEGUIN ZOCRATE DEGUIN ZOCRATE",
-            "YESID RAFAEL REALES MORENO",
-            "ABILIO SEGUNDO ARAUJO ARIÑO",
-            "JAVIER MESA MARTINEZ"
-        ]
+    SUPERVISORES_FIJOS = [
+        "FAVIO ERNESTO VASQUEZ ROMERO",
+        "DEGUIN ZOCRATE DEGUIN ZOCRATE",
+        "YESID RAFAEL REALES MORENO",
+        "ABILIO SEGUNDO ARAUJO ARIÑO",
+        "JAVIER MESA MARTINEZ"
+    ]
 
-        activar = st.toggle("Activar asignación a supervisores")
+    activar = st.toggle("Activar asignación a supervisores")
 
-        if activar:
+    if activar:
 
-            supervisores_sel = st.multiselect("Selecciona supervisores:", SUPERVISORES_FIJOS)
+        supervisores_sel = st.multiselect(
+            "Selecciona supervisores:",
+            SUPERVISORES_FIJOS
+        )
 
-            if supervisores_sel:
+        if supervisores_sel:
 
-                df_sup = df_tecnicos.copy()
-                df_sup["SUPERVISOR_ASIGNADO"] = None
+            df_sup = df_tecnicos.copy()
+            df_sup["SUPERVISOR_ASIGNADO"] = None
 
-                max_por_supervisor = 8
-                total_capacidad = len(supervisores_sel) * max_por_supervisor
+            max_por_supervisor = 8
+            total_capacidad = len(supervisores_sel) * max_por_supervisor
 
-                contador_global = 0
+            contador_global = 0
 
-                for sup in supervisores_sel:
-                    contador_local = 0
-                    for i in range(len(df_sup)):
-                        if contador_global >= total_capacidad:
-                            break
-                        if pd.isna(df_sup.at[i, "SUPERVISOR_ASIGNADO"]) and contador_local < max_por_supervisor:
-                            df_sup.at[i, "SUPERVISOR_ASIGNADO"] = sup
-                            contador_local += 1
-                            contador_global += 1
+            for sup in supervisores_sel:
+                contador_local = 0
+                for i in range(len(df_sup)):
+                    if contador_global >= total_capacidad:
+                        break
+                    if pd.isna(df_sup.at[i, "SUPERVISOR_ASIGNADO"]) and contador_local < max_por_supervisor:
+                        df_sup.at[i, "SUPERVISOR_ASIGNADO"] = sup
+                        contador_local += 1
+                        contador_global += 1
 
-                st.dataframe(df_sup, use_container_width=True)
+            # 🔥 GUARDAMOS EN SESSION
+            st.session_state["df_sup"] = df_sup
+
+            st.dataframe(df_sup, use_container_width=True)
+
+    else:
+        st.info("Asignación desactivada.")
 
     # =====================================================
     # TAB 4 - RESUMEN SUPERVISORES
     # =====================================================
-    with tab4:
+   with tab4:
 
-        st.subheader("🏆 Resumen Supervisores")
+    st.subheader("🏆 Resumen Supervisores")
+
+    if "df_sup" in st.session_state:
+
+        df_sup = st.session_state["df_sup"]
 
         if "SUPERVISOR_ASIGNADO" in df_sup.columns:
 
@@ -222,10 +235,21 @@ if archivo:
                 .reset_index()
             )
 
-            st.dataframe(df_resumen, use_container_width=True)
+            if not df_resumen.empty:
 
-            fig = px.bar(df_resumen, x="SUPERVISOR_ASIGNADO", y="Total_Deuda", text_auto=True)
-            st.plotly_chart(fig, use_container_width=True)
+                st.dataframe(df_resumen, use_container_width=True)
 
-else:
-    st.info("👆 Sube un archivo para comenzar.")
+                fig = px.bar(
+                    df_resumen,
+                    x="SUPERVISOR_ASIGNADO",
+                    y="Total_Deuda",
+                    text_auto=True
+                )
+
+                st.plotly_chart(fig, use_container_width=True)
+
+            else:
+                st.info("No hay pólizas asignadas aún.")
+
+    else:
+        st.info("Primero activa la asignación en la pestaña anterior.")
