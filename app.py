@@ -97,33 +97,10 @@ if archivo:
         if not df_tecnicos.empty:
 
             output = io.BytesIO()
-            df_export = df_tecnicos.copy()
-
-            columnas_moneda = ["ULT_PAGO", "VALOR_ULTFACT", "DEUDA_TOTAL"]
-
-            for col in columnas_moneda:
-                if col in df_export.columns:
-                    df_export[col] = (
-                        df_export[col]
-                        .astype(str)
-                        .str.replace("$", "", regex=False)
-                        .str.replace(",", "", regex=False)
-                        .str.replace(".", "", regex=False)
-                        .str.strip()
-                    )
-                    df_export[col] = pd.to_numeric(df_export[col], errors="coerce").fillna(0)
-
-            df_export = df_export.drop(columns=["_deuda_num"], errors="ignore")
+            df_export = df_tecnicos.drop(columns=["_deuda_num"], errors="ignore")
 
             with pd.ExcelWriter(output, engine="openpyxl") as writer:
                 df_export.to_excel(writer, index=False, sheet_name="Tecnicos")
-                worksheet = writer.sheets["Tecnicos"]
-
-                for col in columnas_moneda:
-                    if col in df_export.columns:
-                        col_idx = df_export.columns.get_loc(col) + 1
-                        for row in range(2, len(df_export) + 2):
-                            worksheet.cell(row=row, column=col_idx).number_format = '"$"#,##0'
 
             output.seek(0)
 
@@ -134,24 +111,24 @@ if archivo:
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
             )
 
-       # ================================
-    # DASHBOARD
-    # ================================
+    # =====================================================
+    # TAB 2 - DASHBOARD
+    # =====================================================
     with tab2:
 
         col1, col2, col3 = st.columns(3)
 
-        col1.metric("Total Pólizas", len(df_filtrado))
-        col2.metric("Total Deuda", f"$ {df_filtrado['_deuda_num'].sum():,.0f}")
-        col3.metric("Técnicos Activos", df_filtrado["TECNICOS_INTEGRALES"].nunique())
+        col1.metric("Total Pólizas", len(df_tecnicos))
+        col2.metric("Total Deuda", f"$ {df_tecnicos['_deuda_num'].sum():,.0f}")
+        col3.metric("Técnicos Activos", df_tecnicos["TECNICOS_INTEGRALES"].nunique())
 
         st.divider()
 
-        # Top 10 técnicos
+        # TOP 10 TABLA
         st.subheader("🏆 Top 10 Técnicos con Mayor Deuda")
 
         top10 = (
-            df_filtrado
+            df_tecnicos
             .groupby("TECNICOS_INTEGRALES")["_deuda_num"]
             .sum()
             .sort_values(ascending=False)
@@ -164,41 +141,26 @@ if archivo:
 
         st.dataframe(top10, use_container_width=True)
 
-        # Gráfica Rango Edad
+        # GRÁFICA RANGO EDAD
         st.subheader("📊 Pólizas por Rango de Edad")
 
-        conteo = df_filtrado["RANGO_EDAD"].astype(str).value_counts().reset_index()
+        conteo = df_tecnicos["RANGO_EDAD"].astype(str).value_counts().reset_index()
         conteo.columns = ["Rango Edad", "Cantidad"]
 
-        fig = px.bar(
-            conteo,
-            x="Rango Edad",
-            y="Cantidad",
-            text_auto=True
-        )
-
+        fig = px.bar(conteo, x="Rango Edad", y="Cantidad", text_auto=True)
         st.plotly_chart(fig, use_container_width=True)
 
-        # Pie Subcategoría
+        # PIE SUBCATEGORIA
         st.subheader("🥧 Distribución por Subcategoría")
 
-        conteo_sub = df_filtrado["SUBCATEGORIA"].value_counts().reset_index()
+        conteo_sub = df_tecnicos["SUBCATEGORIA"].value_counts().reset_index()
         conteo_sub.columns = ["Subcategoría", "Cantidad"]
 
-        fig2 = px.pie(
-            conteo_sub,
-            names="Subcategoría",
-            values="Cantidad"
-        )
-
+        fig2 = px.pie(conteo_sub, names="Subcategoría", values="Cantidad")
         st.plotly_chart(fig2, use_container_width=True)
 
-else:
-    st.info("👆 Sube un archivo para comenzar.")
-
-
     # =====================================================
-    # TAB 3 - ASIGNACIÓN SUPERVISORES
+    # TAB 3 - SUPERVISORES
     # =====================================================
     with tab3:
 
@@ -212,32 +174,23 @@ else:
             "JAVIER MESA MARTINEZ"
         ]
 
-        max_por_supervisor = 8
-
         activar = st.toggle("Activar asignación a supervisores")
 
         if activar:
 
-            supervisores_seleccionados = st.multiselect(
-                "Selecciona supervisores:",
-                SUPERVISORES_FIJOS
-            )
+            supervisores_sel = st.multiselect("Selecciona supervisores:", SUPERVISORES_FIJOS)
 
-            if supervisores_seleccionados:
+            if supervisores_sel:
 
-                df_sup = df[
-                    (df["RANGO_EDAD"].astype(str).isin(rangos_sel)) &
-                    (df["SUBCATEGORIA"].astype(str).isin(sub_sel)) &
-                    (df["_deuda_num"] >= deuda_minima)
-                ].copy()
-
-                df_sup = df_sup.sort_values("_deuda_num", ascending=False).reset_index(drop=True)
+                df_sup = df_tecnicos.copy()
                 df_sup["SUPERVISOR_ASIGNADO"] = None
 
-                total_capacidad = len(supervisores_seleccionados) * max_por_supervisor
+                max_por_supervisor = 8
+                total_capacidad = len(supervisores_sel) * max_por_supervisor
+
                 contador_global = 0
 
-                for sup in supervisores_seleccionados:
+                for sup in supervisores_sel:
                     contador_local = 0
                     for i in range(len(df_sup)):
                         if contador_global >= total_capacidad:
@@ -249,9 +202,6 @@ else:
 
                 st.dataframe(df_sup, use_container_width=True)
 
-        else:
-            st.info("Asignación desactivada.")
-
     # =====================================================
     # TAB 4 - RESUMEN SUPERVISORES
     # =====================================================
@@ -259,69 +209,23 @@ else:
 
         st.subheader("🏆 Resumen Supervisores")
 
-        SUPERVISORES_FIJOS = [
-            "FAVIO ERNESTO VASQUEZ ROMERO",
-            "DEGUIN ZOCRATE DEGUIN ZOCRATE",
-            "YESID RAFAEL REALES MORENO",
-            "ABILIO SEGUNDO ARAUJO ARIÑO",
-            "JAVIER MESA MARTINEZ"
-        ]
+        if "SUPERVISOR_ASIGNADO" in df_sup.columns:
 
-        max_por_supervisor = 8
-
-        activar_resumen = st.toggle("Activar resumen supervisores")
-
-        if activar_resumen:
-
-            supervisores_seleccionados = st.multiselect(
-                "Selecciona supervisores para resumen:",
-                SUPERVISORES_FIJOS,
-                key="resumen"
+            df_resumen = (
+                df_sup
+                .dropna(subset=["SUPERVISOR_ASIGNADO"])
+                .groupby("SUPERVISOR_ASIGNADO")
+                .agg(
+                    Total_Polizas=("SUPERVISOR_ASIGNADO", "count"),
+                    Total_Deuda=("_deuda_num", "sum")
+                )
+                .reset_index()
             )
 
-            if supervisores_seleccionados:
+            st.dataframe(df_resumen, use_container_width=True)
 
-                df_sup = df[
-                    (df["RANGO_EDAD"].astype(str).isin(rangos_sel)) &
-                    (df["SUBCATEGORIA"].astype(str).isin(sub_sel)) &
-                    (df["_deuda_num"] >= deuda_minima)
-                ].copy()
-
-                df_sup = df_sup.sort_values("_deuda_num", ascending=False).reset_index(drop=True)
-                df_sup["SUPERVISOR_ASIGNADO"] = None
-
-                total_capacidad = len(supervisores_seleccionados) * max_por_supervisor
-                contador_global = 0
-
-                for sup in supervisores_seleccionados:
-                    contador_local = 0
-                    for i in range(len(df_sup)):
-                        if contador_global >= total_capacidad:
-                            break
-                        if pd.isna(df_sup.at[i, "SUPERVISOR_ASIGNADO"]) and contador_local < max_por_supervisor:
-                            df_sup.at[i, "SUPERVISOR_ASIGNADO"] = sup
-                            contador_local += 1
-                            contador_global += 1
-
-                df_resumen = (
-                    df_sup
-                    .dropna(subset=["SUPERVISOR_ASIGNADO"])
-                    .groupby("SUPERVISOR_ASIGNADO")
-                    .agg(
-                        Total_Polizas=("SUPERVISOR_ASIGNADO", "count"),
-                        Total_Deuda=("_deuda_num", "sum"),
-                        Promedio_Deuda=("_deuda_num", "mean")
-                    )
-                    .reset_index()
-                )
-
-                st.dataframe(df_resumen, use_container_width=True)
-
-                fig = px.bar(df_resumen, x="SUPERVISOR_ASIGNADO", y="Total_Deuda", text_auto=True)
-                st.plotly_chart(fig, use_container_width=True)
-
-        else:
-            st.info("Resumen desactivado.")
+            fig = px.bar(df_resumen, x="SUPERVISOR_ASIGNADO", y="Total_Deuda", text_auto=True)
+            st.plotly_chart(fig, use_container_width=True)
 
 else:
-    st.info("Sube el archivo consolidado para comenzar.")
+    st.info("👆 Sube un archivo para comenzar.")
