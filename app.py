@@ -134,10 +134,12 @@ if archivo:
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
             )
 
-    # =====================================================
-    # TAB 2 - DASHBOARD
+       # =====================================================
+    # TAB 2 - DASHBOARD (VERSIÓN ORIGINAL)
     # =====================================================
     with tab2:
+
+        st.subheader("📊 Dashboard Ejecutivo")
 
         col1, col2, col3 = st.columns(3)
 
@@ -147,17 +149,67 @@ if archivo:
 
         st.divider()
 
-        top10 = (
+        # =============================
+        # GRÁFICA 1 - Deuda por Técnico
+        # =============================
+        deuda_tecnico = (
             df_tecnicos
             .groupby("TECNICOS_INTEGRALES")["_deuda_num"]
             .sum()
-            .sort_values(ascending=False)
-            .head(10)
             .reset_index()
+            .sort_values("_deuda_num", ascending=False)
         )
 
-        fig = px.bar(top10, x="TECNICOS_INTEGRALES", y="_deuda_num", text_auto=True)
-        st.plotly_chart(fig, use_container_width=True)
+        fig1 = px.bar(
+            deuda_tecnico,
+            x="TECNICOS_INTEGRALES",
+            y="_deuda_num",
+            title="Deuda Total por Técnico",
+            text_auto=True
+        )
+
+        st.plotly_chart(fig1, use_container_width=True)
+
+        # =============================
+        # GRÁFICA 2 - Cantidad por Técnico
+        # =============================
+        cantidad_tecnico = (
+            df_tecnicos
+            .groupby("TECNICOS_INTEGRALES")
+            .size()
+            .reset_index(name="Cantidad")
+            .sort_values("Cantidad", ascending=False)
+        )
+
+        fig2 = px.bar(
+            cantidad_tecnico,
+            x="TECNICOS_INTEGRALES",
+            y="Cantidad",
+            title="Cantidad de Pólizas por Técnico",
+            text_auto=True
+        )
+
+        st.plotly_chart(fig2, use_container_width=True)
+
+        # =============================
+        # GRÁFICA 3 - Distribución por Subcategoría
+        # =============================
+        subcat = (
+            df_tecnicos
+            .groupby("SUBCATEGORIA")
+            .size()
+            .reset_index(name="Cantidad")
+        )
+
+        fig3 = px.pie(
+            subcat,
+            names="SUBCATEGORIA",
+            values="Cantidad",
+            title="Distribución por Subcategoría"
+        )
+
+        st.plotly_chart(fig3, use_container_width=True)
+
 
     # =====================================================
     # TAB 3 - ASIGNACIÓN SUPERVISORES
