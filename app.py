@@ -134,81 +134,67 @@ if archivo:
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
             )
 
-       # =====================================================
-    # TAB 2 - DASHBOARD (VERSIÓN ORIGINAL)
-    # =====================================================
+       # ================================
+    # DASHBOARD
+    # ================================
     with tab2:
-
-        st.subheader("📊 Dashboard Ejecutivo")
 
         col1, col2, col3 = st.columns(3)
 
-        col1.metric("Total Pólizas", len(df_tecnicos))
-        col2.metric("Total Deuda", f"$ {df_tecnicos['_deuda_num'].sum():,.0f}")
-        col3.metric("Técnicos Activos", df_tecnicos["TECNICOS_INTEGRALES"].nunique())
+        col1.metric("Total Pólizas", len(df_filtrado))
+        col2.metric("Total Deuda", f"$ {df_filtrado['_deuda_num'].sum():,.0f}")
+        col3.metric("Técnicos Activos", df_filtrado["TECNICOS_INTEGRALES"].nunique())
 
         st.divider()
 
-        # =============================
-        # GRÁFICA 1 - Deuda por Técnico
-        # =============================
-        deuda_tecnico = (
-            df_tecnicos
+        # Top 10 técnicos
+        st.subheader("🏆 Top 10 Técnicos con Mayor Deuda")
+
+        top10 = (
+            df_filtrado
             .groupby("TECNICOS_INTEGRALES")["_deuda_num"]
             .sum()
+            .sort_values(ascending=False)
+            .head(10)
             .reset_index()
-            .sort_values("_deuda_num", ascending=False)
         )
 
-        fig1 = px.bar(
-            deuda_tecnico,
-            x="TECNICOS_INTEGRALES",
-            y="_deuda_num",
-            title="Deuda Total por Técnico",
-            text_auto=True
-        )
+        top10.columns = ["Técnico", "Total Deuda"]
+        top10["Total Deuda"] = top10["Total Deuda"].apply(lambda x: f"$ {x:,.0f}")
 
-        st.plotly_chart(fig1, use_container_width=True)
+        st.dataframe(top10, use_container_width=True)
 
-        # =============================
-        # GRÁFICA 2 - Cantidad por Técnico
-        # =============================
-        cantidad_tecnico = (
-            df_tecnicos
-            .groupby("TECNICOS_INTEGRALES")
-            .size()
-            .reset_index(name="Cantidad")
-            .sort_values("Cantidad", ascending=False)
-        )
+        # Gráfica Rango Edad
+        st.subheader("📊 Pólizas por Rango de Edad")
 
-        fig2 = px.bar(
-            cantidad_tecnico,
-            x="TECNICOS_INTEGRALES",
+        conteo = df_filtrado["RANGO_EDAD"].astype(str).value_counts().reset_index()
+        conteo.columns = ["Rango Edad", "Cantidad"]
+
+        fig = px.bar(
+            conteo,
+            x="Rango Edad",
             y="Cantidad",
-            title="Cantidad de Pólizas por Técnico",
             text_auto=True
+        )
+
+        st.plotly_chart(fig, use_container_width=True)
+
+        # Pie Subcategoría
+        st.subheader("🥧 Distribución por Subcategoría")
+
+        conteo_sub = df_filtrado["SUBCATEGORIA"].value_counts().reset_index()
+        conteo_sub.columns = ["Subcategoría", "Cantidad"]
+
+        fig2 = px.pie(
+            conteo_sub,
+            names="Subcategoría",
+            values="Cantidad"
         )
 
         st.plotly_chart(fig2, use_container_width=True)
 
-        # =============================
-        # GRÁFICA 3 - Distribución por Subcategoría
-        # =============================
-        subcat = (
-            df_tecnicos
-            .groupby("SUBCATEGORIA")
-            .size()
-            .reset_index(name="Cantidad")
-        )
-
-        fig3 = px.pie(
-            subcat,
-            names="SUBCATEGORIA",
-            values="Cantidad",
-            title="Distribución por Subcategoría"
-        )
-
-        st.plotly_chart(fig3, use_container_width=True)
+else:
+    st.info("👆 Sube un archivo para comenzar.")
 
 
     # =====================================================
