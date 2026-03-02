@@ -211,7 +211,9 @@ if archivo:
             st.info("Asignación desactivada.")
 
     # =====================================================
-   with tab4:
+    # TAB 4 - RESUMEN SUPERVISORES
+    # =====================================================
+    with tab4:
 
         st.subheader("🏆 Resumen Supervisores")
 
