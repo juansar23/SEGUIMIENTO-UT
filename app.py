@@ -162,16 +162,16 @@ if archivo:
     # =====================================================
     # TAB 3 - SUPERVISORES
     # =====================================================
-    with tab3:
+   with tab3:
 
-    st.subheader("🧑‍💼 Asignación Supervisores")
+    st.subheader("👨‍💼 Asignación Supervisores")
 
     SUPERVISORES_FIJOS = [
         "FAVIO ERNESTO VASQUEZ ROMERO",
         "DEGUIN ZOCRATE DEGUIN ZOCRATE",
         "YESID RAFAEL REALES MORENO",
         "ABILIO SEGUNDO ARAUJO ARIÑO",
-        "JAVIER MESA MARTINEZ"
+        "JAVIER DAVID GOMEZ BARRIOS"
     ]
 
     activar = st.toggle("Activar asignación a supervisores")
@@ -203,13 +203,13 @@ if archivo:
                         contador_local += 1
                         contador_global += 1
 
-            # 🔥 GUARDAMOS EN SESSION
             st.session_state["df_sup"] = df_sup
 
             st.dataframe(df_sup, use_container_width=True)
 
     else:
         st.info("Asignación desactivada.")
+
 
     # =====================================================
     # TAB 4 - RESUMEN SUPERVISORES
