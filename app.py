@@ -220,21 +220,17 @@ if archivo:
         .sort_values(ascending=False)
         .reset_index()
         )
-
-ranking_sup.columns = ["Supervisor", "Total Deuda"]
-
-# Mostrar tabla formateada
-tabla_ranking = ranking_sup.copy()
-tabla_ranking["Total Deuda"] = tabla_ranking["Total Deuda"].apply(lambda x: f"$ {x:,.0f}")
-
-st.dataframe(tabla_ranking, use_container_width=True)
-
-# Gráfica ranking
-fig_rank = px.bar(
-    ranking_sup,
-    x="Supervisor",
-    y="Total Deuda",
-    text_auto=True
-)
-
-st.plotly_chart(fig_rank, use_container_width=True)
+        ranking_sup.columns = ["Supervisor", "Total Deuda"]
+        # Mostrar tabla formateada
+        tabla_ranking = ranking_sup.copy()
+        tabla_ranking["Total Deuda"] = tabla_ranking["Total Deuda"].apply(lambda x: f"$ {x:,.0f}")
+        
+        st.dataframe(tabla_ranking, use_container_width=True)
+        # Gráfica ranking
+        fig_rank = px.bar(
+        ranking_sup,
+        x="Supervisor",
+        y="Total Deuda",
+        text_auto=True
+        )
+        st.plotly_chart(fig_rank, use_container_width=True)
