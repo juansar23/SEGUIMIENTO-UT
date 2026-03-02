@@ -215,38 +215,33 @@ if archivo:
     # =====================================================
     with tab4:
 
-        st.subheader("🏆 Resumen Supervisores")
+        # =========================
+# TOP SUPERVISORES POR DEUDA TOTAL
+# =========================
+st.subheader("🏆 Ranking Supervisores por Deuda Asignada")
 
-        if "df_sup" in st.session_state:
+ranking_sup = (
+    df_sup
+    .groupby("SUPERVISOR_ASIGNADO")["_deuda_num"]
+    .sum()
+    .sort_values(ascending=False)
+    .reset_index()
+)
 
-            df_sup = st.session_state["df_sup"]
+ranking_sup.columns = ["Supervisor", "Total Deuda"]
 
-            df_resumen = (
-                df_sup
-                .dropna(subset=["SUPERVISOR_ASIGNADO"])
-                .groupby("SUPERVISOR_ASIGNADO")
-                .agg(
-                    Total_Polizas=("SUPERVISOR_ASIGNADO", "count"),
-                    Total_Deuda=("_deuda_num", "sum")
-                )
-                .reset_index()
-            )
+# Mostrar tabla formateada
+tabla_ranking = ranking_sup.copy()
+tabla_ranking["Total Deuda"] = tabla_ranking["Total Deuda"].apply(lambda x: f"$ {x:,.0f}")
 
-            if not df_resumen.empty:
+st.dataframe(tabla_ranking, use_container_width=True)
 
-                st.dataframe(df_resumen, use_container_width=True)
+# Gráfica ranking
+fig_rank = px.bar(
+    ranking_sup,
+    x="Supervisor",
+    y="Total Deuda",
+    text_auto=True
+)
 
-                fig = px.bar(
-                    df_resumen,
-                    x="SUPERVISOR_ASIGNADO",
-                    y="Total_Deuda",
-                    text_auto=True
-                )
-
-                st.plotly_chart(fig, use_container_width=True)
-
-            else:
-                st.info("No hay pólizas asignadas aún.")
-
-        else:
-            st.info("Primero activa la asignación en la pestaña anterior.")
+st.plotly_chart(fig_rank, use_container_width=True)
