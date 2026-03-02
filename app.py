@@ -214,19 +214,12 @@ if archivo:
     # TAB 4 - RESUMEN SUPERVISORES
     # =====================================================
     with tab4:
-
-        # =========================
-# TOP SUPERVISORES POR DEUDA TOTAL
-# =========================
-st.subheader("🏆 Ranking Supervisores por Deuda Asignada")
-
-ranking_sup = (
-    df_sup
-    .groupby("SUPERVISOR_ASIGNADO")["_deuda_num"]
-    .sum()
-    .sort_values(ascending=False)
-    .reset_index()
-)
+        st.subheader("🏆 Ranking Supervisores por Deuda Asignada")
+        ranking_sup = (df_sup.groupby("SUPERVISOR_ASIGNADO")["_deuda_num"]
+        .sum()
+        .sort_values(ascending=False)
+        .reset_index()
+        )
 
 ranking_sup.columns = ["Supervisor", "Total Deuda"]
 
