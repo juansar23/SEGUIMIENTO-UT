@@ -213,17 +213,37 @@ if archivo:
     # =====================================================
     # TAB 4 - RESUMEN SUPERVISORES
     # =====================================================
-    with tab4:
+   # =========================
+# TOP SUPERVISORES POR DEUDA TOTAL
+# =========================
+st.subheader("🏆 Ranking Supervisores por Deuda Asignada")
 
-        st.subheader("🏆 Resumen Supervisores")
+ranking_sup = (
+    df_sup
+    .groupby("SUPERVISOR_ASIGNADO")["_deuda_num"]
+    .sum()
+    .sort_values(ascending=False)
+    .reset_index()
+)
 
-        if "df_sup" in st.session_state:
+ranking_sup.columns = ["Supervisor", "Total Deuda"]
 
-            df_sup = st.session_state["df_sup"]
+# Mostrar tabla formateada
+tabla_ranking = ranking_sup.copy()
+tabla_ranking["Total Deuda"] = tabla_ranking["Total Deuda"].apply(lambda x: f"$ {x:,.0f}")
 
-            df_resumen = (
-                df_sup
-                .dropna(subset=["SUPERVISOR_ASIGNADO"])
+st.dataframe(tabla_ranking, use_container_width=True)
+
+# Gráfica ranking
+fig_rank = px.bar(
+    ranking_sup,
+    x="Supervisor",
+    y="Total Deuda",
+    text_auto=True
+)
+
+st.plotly_chart(fig_rank, use_container_width=True)
+
                 .groupby("SUPERVISOR_ASIGNADO")
                 .agg(
                     Total_Polizas=("SUPERVISOR_ASIGNADO", "count"),
