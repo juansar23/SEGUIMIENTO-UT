@@ -1,7 +1,6 @@
 import streamlit as st
 import pandas as pd
 import plotly.express as px
-import numpy as np
 
 st.set_page_config(layout="wide")
 
@@ -16,42 +15,31 @@ archivo = st.file_uploader("Cargar archivo consolidado", type=["xlsx"])
 if archivo:
 
     df = pd.read_excel(archivo)
-
-    # ---------------------------------------------
-    # LIMPIEZA
-    # ---------------------------------------------
-
     df.columns = df.columns.str.strip()
 
-    columnas_fecha = [
-        "FECHA_VENCIMIENTO",
-        "ULT_FECHAPAGO",
-        "FECHA_ASIGNACION"
-    ]
+    # ----------------------------
+    # FORMATO FECHAS
+    # ----------------------------
+    columnas_fecha = ["FECHA_VENCIMIENTO", "ULT_FECHAPAGO", "FECHA_ASIGNACION"]
 
     for col in columnas_fecha:
         if col in df.columns:
             df[col] = pd.to_datetime(df[col], errors="coerce").dt.strftime("%d/%m/%Y")
 
-    columnas_monedas = [
-        "ULT_PAGO",
-        "VALOR_ULTFACT",
-        "DEUDA_TOTAL"
-    ]
-
-    for col in columnas_monedas:
-        if col in df.columns:
-            df[col] = (
-                df[col]
-                .astype(str)
-                .str.replace("$", "", regex=False)
-                .str.replace(",", "", regex=False)
-            )
+    # ----------------------------
+    # LIMPIAR MONEDA
+    # ----------------------------
+    df["DEUDA_TOTAL"] = (
+        df["DEUDA_TOTAL"]
+        .astype(str)
+        .str.replace("$", "", regex=False)
+        .str.replace(",", "", regex=False)
+    )
 
     df["_deuda_num"] = pd.to_numeric(df["DEUDA_TOTAL"], errors="coerce").fillna(0)
 
     # =====================================================
-    # SIDEBAR FILTROS GENERALES
+    # SIDEBAR FILTROS
     # =====================================================
 
     st.sidebar.header("🔎 Filtros Generales")
@@ -110,7 +98,6 @@ if archivo:
         st.subheader("Asignación a Técnicos")
 
         tecnicos = df_filtrado["TECNICOS_INTEGRALES"].dropna().unique()
-
         excluir = st.multiselect("🚫 Excluir técnicos", tecnicos)
 
         activos = [t for t in tecnicos if t not in excluir]
@@ -123,7 +110,7 @@ if archivo:
 
         st.session_state["df_tecnicos"] = df_tecnicos
 
-        st.dataframe(df_tecnicos)
+        st.dataframe(df_tecnicos, use_container_width=True)
 
     # =====================================================
     # TAB 1 - DASHBOARD TÉCNICOS
@@ -159,11 +146,18 @@ if archivo:
 
             st.subheader("📊 Pólizas por Rango Edad")
 
-            rango_count = df_t["RANGO_EDAD"].value_counts().reindex(rangos_ordenados).dropna().reset_index()
+            rango_count = (
+                df_t["RANGO_EDAD"]
+                .value_counts()
+                .reindex(rangos_ordenados)
+                .dropna()
+                .reset_index()
+            )
+
             rango_count.columns = ["Rango", "Cantidad"]
 
             fig1 = px.bar(rango_count, x="Rango", y="Cantidad", text_auto=True)
-            st.plotly_chart(fig1, use_container_width=True)
+            st.plotly_chart(fig1, use_container_width=True, key="grafico_rango_tecnicos")
 
             st.subheader("🥧 Subcategoría")
 
@@ -171,7 +165,7 @@ if archivo:
             sub_count.columns = ["Subcategoría", "Cantidad"]
 
             fig2 = px.pie(sub_count, names="Subcategoría", values="Cantidad")
-            st.plotly_chart(fig2, use_container_width=True)
+            st.plotly_chart(fig2, use_container_width=True, key="grafico_sub_tecnicos")
 
     # =====================================================
     # TAB 3 - ASIGNACIÓN SUPERVISORES
@@ -193,7 +187,6 @@ if archivo:
 
             supervisor_sel = st.selectbox("Seleccionar Supervisor", supervisores)
 
-            # Base supervisores = mismo filtro pero sin los técnicos
             df_base_sup = df_filtrado.copy()
 
             if "df_tecnicos" in st.session_state:
@@ -208,7 +201,7 @@ if archivo:
 
             st.success(f"Asignadas {len(df_base_sup)} pólizas a {supervisor_sel}")
 
-            st.dataframe(df_base_sup)
+            st.dataframe(df_base_sup, use_container_width=True)
 
     # =====================================================
     # TAB 4 - DASHBOARD SUPERVISORES
@@ -236,16 +229,29 @@ if archivo:
                 .reset_index()
             )
 
-            fig_rank = px.bar(ranking, x="SUPERVISOR_ASIGNADO", y="_deuda_num", text_auto=True)
-            st.plotly_chart(fig_rank, use_container_width=True)
+            fig_rank = px.bar(
+                ranking,
+                x="SUPERVISOR_ASIGNADO",
+                y="_deuda_num",
+                text_auto=True
+            )
+
+            st.plotly_chart(fig_rank, use_container_width=True, key="grafico_rank_supervisores")
 
             st.subheader("📊 Pólizas por Rango Edad")
 
-            rango_sup = df_s["RANGO_EDAD"].value_counts().reindex(rangos_ordenados).dropna().reset_index()
+            rango_sup = (
+                df_s["RANGO_EDAD"]
+                .value_counts()
+                .reindex(rangos_ordenados)
+                .dropna()
+                .reset_index()
+            )
+
             rango_sup.columns = ["Rango", "Cantidad"]
 
             fig3 = px.bar(rango_sup, x="Rango", y="Cantidad", text_auto=True)
-            st.plotly_chart(fig3, use_container_width=True)
+            st.plotly_chart(fig3, use_container_width=True, key="grafico_rango_supervisores")
 
             st.subheader("🥧 Subcategoría")
 
@@ -253,4 +259,4 @@ if archivo:
             sub_sup.columns = ["Subcategoría", "Cantidad"]
 
             fig4 = px.pie(sub_sup, names="Subcategoría", values="Cantidad")
-            st.plotly_chart(fig4, use_container_width=True)
+            st.plotly_chart(fig4, use_container_width=True, key="grafico_sub_supervisores")
