@@ -163,8 +163,7 @@ if archivo:
     # TAB 3 - SUPERVISORES
     # =====================================================
    with tab3:
-
-    st.subheader("👨‍💼 Asignación Supervisores")
+       st.subheader("👨‍💼 Asignación Supervisores")
 
     SUPERVISORES_FIJOS = [
         "FAVIO ERNESTO VASQUEZ ROMERO",
