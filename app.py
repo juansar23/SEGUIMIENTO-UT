@@ -2,11 +2,10 @@ import streamlit as st
 import pandas as pd
 import io
 import plotly.express as px
-import numpy as np
 
 st.set_page_config(page_title="Dashboard Ejecutivo UT", layout="wide")
 
-st.title("📊 Asignación de Trabajo - Supervisores")
+st.title("📊 Dashboard Ejecutivo - Asignación Dual (Sup/Tec)")
 
 # Lista fija de supervisores
 SUPERVISORES_NOMINA = [
@@ -23,7 +22,7 @@ if archivo:
     df = pd.read_excel(archivo)
     df.columns = df.columns.str.strip()
 
-    # VALIDAR COLUMNAS CLAVE (Sin Supervisor porque la crearemos)
+    # VALIDAR COLUMNAS CLAVE
     columnas_necesarias = ["RANGO_EDAD", "SUBCATEGORIA", "DEUDA_TOTAL", "TECNICOS_INTEGRALES"]
     for col in columnas_necesarias:
         if col not in df.columns:
@@ -43,106 +42,114 @@ if archivo:
     # ================================
     # SIDEBAR FILTROS
     # ================================
-    st.sidebar.header("🎯 Configuración de Asignación")
-
-    # Filtro de Supervisores (Manual)
-    modo_ex_sup = st.sidebar.checkbox("Seleccionar todos los supervisores excepto")
+    st.sidebar.header("🎯 Filtros de Selección")
+    
+    # 1. Filtro Supervisores
+    st.sidebar.subheader("👨‍💼 Supervisores")
+    modo_ex_sup = st.sidebar.checkbox("Seleccionar todos excepto (Sup)")
     if modo_ex_sup:
         excluir_sup = st.sidebar.multiselect("Supervisores a excluir", SUPERVISORES_NOMINA)
-        supervisores_final = [s for s in SUPERVISORES_NOMINA if s not in excluir_sup]
+        sups_final = [s for s in SUPERVISORES_NOMINA if s not in excluir_sup]
     else:
-        supervisores_final = st.sidebar.multiselect("Supervisores a incluir", SUPERVISORES_NOMINA, default=SUPERVISORES_NOMINA)
+        sups_final = st.sidebar.multiselect("Supervisores a incluir", SUPERVISORES_NOMINA, default=SUPERVISORES_NOMINA)
 
+    # 2. Filtro Técnicos
     st.sidebar.divider()
-    
-    # Filtros de datos
+    st.sidebar.subheader("👥 Técnicos Integrales")
+    tecnicos_lista = sorted(df["TECNICOS_INTEGRALES"].dropna().unique())
+    modo_ex_tec = st.sidebar.checkbox("Seleccionar todos excepto (Tec)")
+    if modo_ex_tec:
+        excluir_tec = st.sidebar.multiselect("Técnicos a excluir", tecnicos_lista)
+        tecs_final = [t for t in tecnicos_lista if t not in excluir_tec]
+    else:
+        tecs_final = st.sidebar.multiselect("Técnicos a incluir", tecnicos_lista, default=tecnicos_lista)
+
+    # 3. Filtros de Data
+    st.sidebar.divider()
     rangos = sorted(df["RANGO_EDAD"].dropna().astype(str).unique())
-    subcategorias = sorted(df["SUBCATEGORIA"].dropna().astype(str).unique())
-    
-    rangos_sel = st.sidebar.multiselect("Rango Edad", rangos, default=rangos)
-    sub_sel = st.sidebar.multiselect("Subcategoría", subcategorias, default=subcategorias)
-    deuda_minima = st.sidebar.number_input("Deudas mayores a:", min_value=0, value=100000, step=50000)
+    sub_sel = st.sidebar.multiselect("Subcategoría", sorted(df["SUBCATEGORIA"].unique()), default=df["SUBCATEGORIA"].unique())
+    deuda_minima = st.sidebar.number_input("Deudas mayores a:", min_value=0, value=100000)
 
     if st.sidebar.button("Limpiar filtros"):
         st.rerun()
 
     # ================================
-    # PROCESO DE ASIGNACIÓN
+    # LÓGICA DE ASIGNACIÓN (SIN CRUCES)
     # ================================
     
-    # 1. Filtrar la base según criterios
-    df_filtrado = df[
-        (df["RANGO_EDAD"].astype(str).isin(rangos_sel)) &
-        (df["SUBCATEGORIA"].astype(str).isin(sub_sel)) &
+    # Base inicial filtrada por criterios globales
+    df_base = df[
+        (df["SUBCATEGORIA"].isin(sub_sel)) & 
         (df["_deuda_num"] >= deuda_minima)
-    ].copy()
+    ].sort_values("_deuda_num", ascending=False)
 
-    # 2. Ordenar por deuda (Priorizar lo más alto)
-    df_filtrado = df_filtrado.sort_values(by="_deuda_num", ascending=False)
-
-    # 3. Lógica de Asignación a Supervisores (Máximo 8 c/u)
-    total_a_asignar = len(supervisores_final) * 8
-    df_asignacion = df_filtrado.head(total_a_asignar).copy()
-
-    if not df_asignacion.empty:
-        # Creamos la columna de supervisor repitiendo cada nombre 8 veces
-        lista_asignacion = []
-        for sup in supervisores_final:
-            lista_asignacion.extend([sup] * 8)
-        
-        # Recortamos la lista en caso de que haya menos de (Supervisores * 8) pólizas
-        lista_asignacion = lista_asignacion[:len(df_asignacion)]
-        df_asignacion["SUPERVISOR_ASIGNADO"] = lista_asignacion
+    # --- ASIGNACIÓN SUPERVISORES (Primero) ---
+    total_sup = len(sups_final) * 8
+    df_supervisores = df_base.head(total_sup).copy()
     
+    # Asignar nombres
+    lista_sups = []
+    for s in sups_final: lista_sups.extend([s] * 8)
+    df_supervisores["ASIGNADO_A"] = lista_sups[:len(df_supervisores)]
+    df_supervisores["TIPO_ASIGNACION"] = "SUPERVISOR"
+
+    # --- ASIGNACIÓN TÉCNICOS (Segundo - Lo que sobra) ---
+    # Eliminamos lo que ya se llevó el supervisor para que no se crucen
+    df_restante = df_base.drop(df_supervisores.index)
+    
+    # Filtrar solo por los técnicos seleccionados en sidebar
+    df_restante = df_restante[df_restante["TECNICOS_INTEGRALES"].isin(tecs_final)]
+    
+    df_tecnicos = (
+        df_restante
+        .groupby("TECNICOS_INTEGRALES")
+        .head(50)
+        .copy()
+    )
+    df_tecnicos["ASIGNADO_A"] = df_tecnicos["TECNICOS_INTEGRALES"]
+    df_tecnicos["TIPO_ASIGNACION"] = "TECNICO"
+
+    # Consolidado Final
+    df_final = pd.concat([df_supervisores, df_tecnicos], ignore_index=True)
+
     # ================================
-    # TABS
+    # TABS Y VISUALIZACIÓN
     # ================================
-    tab1, tab2 = st.tabs(["📋 Plan de Trabajo", "📊 Análisis de Carga"])
+    tab1, tab2 = st.tabs(["📋 Listado de Trabajo", "📊 Dashboard Comparativo"])
 
     with tab1:
-        if df_asignacion.empty:
-            st.warning("No hay pólizas que cumplan con los filtros para asignar.")
-        else:
-            st.success(f"Se han asignado {len(df_asignacion)} pólizas a {len(supervisores_final)} supervisores.")
-            st.dataframe(df_asignacion, use_container_width=True)
+        col_t1, col_t2 = st.columns(2)
+        col_t1.metric("Pólizas Supervisores", len(df_supervisores))
+        col_t2.metric("Pólizas Técnicos", len(df_tecnicos))
+        
+        st.dataframe(df_final, use_container_width=True)
 
-            # Preparar descarga
-            output = io.BytesIO()
-            with pd.ExcelWriter(output, engine="openpyxl") as writer:
-                df_asignacion.drop(columns=["_deuda_num"]).to_excel(writer, index=False, sheet_name="Asignacion")
-            
-            st.download_button(
-                "📥 Descargar Excel de Asignación",
-                data=output.getvalue(),
-                file_name="trabajo_supervisores.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-            )
+        # Exportación
+        output = io.BytesIO()
+        with pd.ExcelWriter(output, engine="openpyxl") as writer:
+            df_final.to_excel(writer, index=False, sheet_name="Asignacion_Total")
+        st.download_button("📥 Descargar Base Consolidada", data=output.getvalue(), file_name="asignacion_ut.xlsx")
 
     with tab2:
-        if not df_asignacion.empty:
-            col1, col2 = st.columns(2)
-            
-            with col1:
-                st.subheader("📦 Pólizas por Supervisor")
-                carga = df_asignacion["SUPERVISOR_ASIGNADO"].value_counts().reset_index()
-                carga.columns = ["Supervisor", "Cantidad"]
-                fig1 = px.bar(carga, x="Cantidad", y="Supervisor", orientation='h', 
-                             text_auto=True, color="Cantidad", color_continuous_scale="Blues")
-                st.plotly_chart(fig1, use_container_width=True)
+        c1, c2 = st.columns(2)
+        
+        with c1:
+            st.subheader("👨‍💼 Carga Supervisores")
+            fig_sup = px.bar(df_supervisores.groupby("ASIGNADO_A").size().reset_index(name='Cant'), 
+                             x="Cant", y="ASIGNADO_A", orientation='h', text_auto=True, title="Pólizas por Supervisor (Máx 8)")
+            st.plotly_chart(fig_sup, use_container_width=True)
 
-            with col2:
-                st.subheader("💰 Deuda Total Asignada")
-                deuda_sup = df_asignacion.groupby("SUPERVISOR_ASIGNADO")["_deuda_num"].sum().reset_index()
-                fig2 = px.pie(deuda_sup, values="_deuda_num", names="SUPERVISOR_ASIGNADO", hole=0.4)
-                st.plotly_chart(fig2, use_container_width=True)
-            
-            st.divider()
-            
-            st.subheader("📈 Top 10 Pólizas de Mayor Deuda en la Asignación")
-            top_p = df_asignacion.head(10)[["SUPERVISOR_ASIGNADO", "TECNICOS_INTEGRALES", "DEUDA_TOTAL"]]
-            st.table(top_p)
-        else:
-            st.info("Sube un archivo y ajusta los filtros para ver las gráficas.")
+        with c2:
+            st.subheader("👥 Top 10 Carga Técnicos")
+            fig_tec = px.bar(df_tecnicos.groupby("ASIGNADO_A").size().reset_index(name='Cant').sort_values("Cant", ascending=False).head(10), 
+                             x="Cant", y="ASIGNADO_A", orientation='h', text_auto=True, title="Pólizas por Técnico (Máx 50)")
+            st.plotly_chart(fig_tec, use_container_width=True)
+
+        st.divider()
+        
+        st.subheader("💰 Distribución de Deuda por Tipo de Asignación")
+        fig_pie = px.sunburst(df_final, path=['TIPO_ASIGNACION', 'ASIGNADO_A'], values='_deuda_num')
+        st.plotly_chart(fig_pie, use_container_width=True)
 
 else:
-    st.info("👆 Sube el archivo Excel para iniciar la repartición de trabajo por supervisor.")
+    st.info("👆 Sube el archivo para generar la asignación jerárquica.")
