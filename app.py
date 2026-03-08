@@ -7,7 +7,7 @@ import plotly.graph_objects as go
 # Configuración de página
 st.set_page_config(page_title="Gestión UT - Sistema ITA", layout="wide")
 
-# Estilo CSS para visibilidad
+# Estilo CSS
 st.markdown("""
     <style>
     div[data-testid="stMetric"] {
@@ -122,17 +122,10 @@ if archivo:
         st.success(f"Plan generado con {len(df_final)} pólizas.")
         st.dataframe(df_final.drop(columns=["_deuda_num"]), use_container_width=True)
         
-        # --- BOTÓN DE DESCARGA (Restaurado) ---
         output = io.BytesIO()
         with pd.ExcelWriter(output, engine="openpyxl") as writer:
-            df_final.drop(columns=["_deuda_num"]).to_excel(writer, index=False, sheet_name="Plan_Asignacion")
-        
-        st.download_button(
-            label="📥 Descargar Plan de Trabajo (Excel)",
-            data=output.getvalue(),
-            file_name="plan_trabajo_ITA.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-        )
+            df_final.drop(columns=["_deuda_num"]).to_excel(writer, index=False, sheet_name="Plan")
+        st.download_button("📥 Descargar Plan de Trabajo", data=output.getvalue(), file_name="plan_ITA.xlsx")
 
     with tab_sup:
         if not df_sup.empty:
@@ -140,16 +133,18 @@ if archivo:
             c1.plotly_chart(kpi_grafico("Deuda Supervisión", df_sup["_deuda_num"].sum()), use_container_width=True)
             c2.plotly_chart(kpi_grafico("Pólizas Supervisión", len(df_sup), False), use_container_width=True)
             
-            st.write("🏆 **Ranking de Supervisores (Mayor Deuda)**")
+            # --- RANKING COMO ESTABA ANTES (TABLA) ---
+            st.write("🏆 **Ranking de Supervisores (Mayor a Menor Deuda)**")
             rank_s = df_sup.groupby("ASIGNADO_A")["_deuda_num"].sum().sort_values(ascending=False).reset_index()
-            st.plotly_chart(px.bar(rank_s, x="ASIGNADO_A", y="_deuda_num", text_auto='.2s'), use_container_width=True)
+            rank_s.columns = ["Supervisor", "Deuda Total"]
+            st.dataframe(rank_s.style.format({"Deuda Total": "$ {:,.0f}"}).bar(subset=["Deuda Total"], color='#007bff33'), use_container_width=True)
 
             col1, col2 = st.columns(2)
             with col1:
                 st.info("Pólizas por Rango de Edad")
                 st.plotly_chart(px.bar(df_sup["RANGO_EDAD"].astype(str).value_counts().reset_index(), x="RANGO_EDAD", y="count"), use_container_width=True)
             with col2:
-                st.info("Deuda por Subcategoría")
+                st.info("Composición por Subcategoría")
                 st.plotly_chart(px.pie(df_sup, names="SUBCATEGORIA", values="_deuda_num", hole=0.4), use_container_width=True)
 
     with tab_tec:
@@ -158,17 +153,19 @@ if archivo:
             c3.plotly_chart(kpi_grafico("Deuda Operarios", df_tec["_deuda_num"].sum()), use_container_width=True)
             c4.plotly_chart(kpi_grafico("Pólizas Operarios", len(df_tec), False), use_container_width=True)
 
+            # --- TOP 10 COMO ESTABA ANTES (TABLA) ---
             st.write("🏆 **Top 10 Operarios con Mayor Deuda**")
             top10 = df_tec.groupby("ASIGNADO_A")["_deuda_num"].sum().sort_values(ascending=False).head(10).reset_index()
-            st.plotly_chart(px.bar(top10, x="ASIGNADO_A", y="_deuda_num", text_auto='.2s', color_discrete_sequence=['#28a745']), use_container_width=True)
+            top10.columns = ["Operario", "Deuda Acumulada"]
+            st.dataframe(top10.style.format({"Deuda Acumulada": "$ {:,.0f}"}).bar(subset=["Deuda Acumulada"], color='#28a74533'), use_container_width=True)
 
             col3, col4 = st.columns(2)
             with col3:
                 st.info("Pólizas por Rango de Edad")
                 st.plotly_chart(px.bar(df_tec["RANGO_EDAD"].astype(str).value_counts().reset_index(), x="RANGO_EDAD", y="count"), use_container_width=True)
             with col4:
-                st.info("Deuda por Subcategoría")
+                st.info("Composición por Subcategoría")
                 st.plotly_chart(px.pie(df_tec, names="SUBCATEGORIA", values="_deuda_num", hole=0.4), use_container_width=True)
 
 else:
-    st.info("👋 Sube el archivo Excel para activar las gráficas y el botón de descarga.")
+    st.info("👋 Sube el Excel para procesar.")
