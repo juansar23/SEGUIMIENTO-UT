@@ -22,14 +22,11 @@ st.markdown("""
     </style>
     """, unsafe_allow_html=True)
 
-st.title("🚀 Sistema ITA - Gestión de Cartera")
+st.title("🚀 Sistema ITA - Asignación por Barrio y PH")
 
-# Lista fija de supervisores
 SUPERVISORES_NOMINA = [
-    "FAVIO ERNESTO VASQUEZ ROMERO",
-    "DEGUIN ZOCRATE DEGUIN ZOCRATE",
-    "YESID RAFAEL REALES MORENO",
-    "ABILIO SEGUNDO ARAUJO ARIÑO",
+    "FAVIO ERNESTO VASQUEZ ROMERO", "DEGUIN ZOCRATE DEGUIN ZOCRATE",
+    "YESID RAFAEL REALES MORENO", "ABILIO SEGUNDO ARAUJO ARIÑO",
     "JAVIER DAVID GOMEZ BARRIOS"
 ]
 
@@ -48,10 +45,8 @@ if archivo:
     )
     df["_deuda_num"] = pd.to_numeric(df["_deuda_num"], errors="coerce").fillna(0)
 
-    # ================================
-    # SIDEBAR: FILTROS
-    # ================================
-    st.sidebar.header("🎯 Panel de Filtros")
+    # Sidebar
+    st.sidebar.header("🎯 Filtros")
     opciones_edad = sorted(df["RANGO_EDAD"].dropna().astype(str).unique())
     opciones_sub = sorted(df["SUBCATEGORIA"].dropna().astype(str).unique())
     tecs_disponibles = sorted(df["TECNICOS_INTEGRALES"].dropna().astype(str).unique())
@@ -59,20 +54,18 @@ if archivo:
     rangos_sel = st.sidebar.multiselect("Rango Edad", opciones_edad, default=opciones_edad)
     sub_sel = st.sidebar.multiselect("Subcategoría", opciones_sub, default=opciones_sub)
     deuda_minima = st.sidebar.number_input("Deuda mínima ($)", value=100000)
-
     sups_final = st.sidebar.multiselect("Supervisores", SUPERVISORES_NOMINA, default=SUPERVISORES_NOMINA)
     tecs_final = st.sidebar.multiselect("Operarios", tecs_disponibles, default=tecs_disponibles)
 
-    # ================================
-    # LÓGICA DE ASIGNACIÓN
-    # ================================
+    # 1. Base Filtrada
     df_base = df[
         (df["RANGO_EDAD"].astype(str).isin(rangos_sel)) &
         (df["SUBCATEGORIA"].astype(str).isin(sub_sel)) &
         (df["_deuda_num"] >= deuda_minima)
-    ].sort_values(by="_deuda_num", ascending=False).copy()
+    ].copy()
 
-    # 1. Supervisores (Zonificación)
+    # 2. Asignación Supervisores (8 mejores por supervisor y bloquean barrios)
+    df_base = df_base.sort_values("_deuda_num", ascending=False)
     df_sup = df_base.head(len(sups_final) * 8).copy()
     barrios_bloqueados = set()
     if not df_sup.empty:
@@ -81,30 +74,61 @@ if archivo:
         df_sup["ASIGNADO_A"] = nombres_sups[:len(df_sup)]
         barrios_bloqueados = set(df_sup[col_barrio].unique())
 
-    # 2. Operarios (Exclusión y PH)
-    df_res = df_base.drop(df_sup.index) if not df_sup.empty else df_base
-    df_disp = df_res[~df_res[col_barrio].isin(barrios_bloqueados)]
+    # 3. Preparación de Operarios
+    df_restante = df_base.drop(df_sup.index) if not df_sup.empty else df_base
+    df_disp = df_restante[~df_restante[col_barrio].isin(barrios_bloqueados)].copy()
     
     tecs_ph = [t for t in tecs_final if "PH" in str(t).upper()]
     tecs_std = [t for t in tecs_final if "PH" not in str(t).upper()]
     
-    asig_tec = []
-    conteo = {t: 0 for t in tecs_final}
-    
-    for _, row in df_disp.iterrows():
-        es_ph = "PH" in str(row["TECNICOS_INTEGRALES"]).upper()
-        candidatos = tecs_ph if es_ph else tecs_std
-        validos = [t for t in candidatos if conteo[t] < 50 and t != row["TECNICOS_INTEGRALES"]]
-        if validos:
-            elegido = min(validos, key=lambda x: conteo[x])
-            nueva = row.copy()
-            nueva["ASIGNADO_A"] = elegido
-            asig_tec.append(nueva)
-            conteo[elegido] += 1
-    df_tec = pd.DataFrame(asig_tec)
+    conteo_polizas = {t: 0 for t in tecs_final}
+    asignaciones_finales = []
+
+    # --- NUEVO MOTOR DE ASIGNACIÓN POR BARRIO ---
+    # Agrupamos por barrio para entregar bloques completos
+    barrios_grupos = df_disp.groupby(col_barrio)
+    # Ordenar barrios por volumen de deuda para asignar lo más importante primero
+    barrios_ordenados = sorted(barrios_grupos, key=lambda x: x[1]["_deuda_num"].sum(), reverse=True)
+
+    for nombre_barrio, datos_barrio in barrios_ordenados:
+        # Separar pólizas PH y Estándar dentro del barrio
+        for tipo_clase in ["PH", "STD"]:
+            if tipo_clase == "PH":
+                pols_barrio = datos_barrio[datos_barrio["TECNICOS_INTEGRALES"].str.contains("PH", na=False, case=False)]
+                candidatos_grupo = tecs_ph
+            else:
+                pols_barrio = datos_barrio[~datos_barrio["TECNICOS_INTEGRALES"].str.contains("PH", na=False, case=False)]
+                candidatos_grupo = tecs_std
+            
+            if pols_barrio.empty: continue
+
+            for idx, row in pols_barrio.iterrows():
+                # Buscar técnico del grupo correcto que NO sea el anterior y tenga cupo
+                candidatos_validos = [
+                    t for t in candidatos_grupo 
+                    if conteo_polizas[t] < 50 and t != row["TECNICOS_INTEGRALES"]
+                ]
+                
+                if candidatos_validos:
+                    # Intentamos mantener el mismo técnico para el mismo barrio
+                    # Buscamos si alguno de los válidos ya tiene algo asignado en este barrio
+                    ya_en_barrio = [t for t in candidatos_validos if any(a['ASIGNADO_A'] == t and a[col_barrio] == nombre_barrio for a in asignaciones_finales)]
+                    
+                    if ya_en_barrio:
+                        elegido = ya_en_barrio[0]
+                    else:
+                        # Si nadie del barrio está, tomamos al que menos carga tenga
+                        elegido = min(candidatos_validos, key=lambda x: conteo_polizas[x])
+                    
+                    nueva = row.copy()
+                    nueva["ASIGNADO_A"] = elegido
+                    asignaciones_finales.append(nueva)
+                    conteo_polizas[elegido] += 1
+
+    df_tec = pd.DataFrame(asignaciones_finales)
 
     # ================================
-    # PESTAÑAS
+    # DASHBOARD
     # ================================
     tab_res, tab_sup, tab_tec = st.tabs(["📑 Reporte General", "👨‍💼 Supervisores", "👥 Operarios"])
 
@@ -119,51 +143,36 @@ if archivo:
 
     with tab_res:
         df_final = pd.concat([df_sup, df_tec], ignore_index=True)
-        st.success(f"Plan generado con {len(df_final)} pólizas.")
         st.dataframe(df_final.drop(columns=["_deuda_num"]), use_container_width=True)
-        
         output = io.BytesIO()
         with pd.ExcelWriter(output, engine="openpyxl") as writer:
             df_final.drop(columns=["_deuda_num"]).to_excel(writer, index=False, sheet_name="Plan")
-        st.download_button("📥 Descargar Plan de Trabajo", data=output.getvalue(), file_name="plan_ITA.xlsx")
+        st.download_button("📥 Descargar Plan de Trabajo", data=output.getvalue(), file_name="plan_ita_zonificado.xlsx")
 
     with tab_sup:
         if not df_sup.empty:
             c1, c2 = st.columns(2)
             c1.plotly_chart(kpi_grafico("Deuda Supervisión", df_sup["_deuda_num"].sum()), use_container_width=True)
             c2.plotly_chart(kpi_grafico("Pólizas Supervisión", len(df_sup), False), use_container_width=True)
-            
-            # --- RANKING COMO ESTABA ANTES (TABLA) ---
-            st.write("🏆 **Ranking de Supervisores (Mayor a Menor Deuda)**")
+            st.write("🏆 **Ranking de Supervisores (Tabla)**")
             rank_s = df_sup.groupby("ASIGNADO_A")["_deuda_num"].sum().sort_values(ascending=False).reset_index()
-            rank_s.columns = ["Supervisor", "Deuda Total"]
-            st.dataframe(rank_s.style.format({"Deuda Total": "$ {:,.0f}"}).bar(subset=["Deuda Total"], color='#007bff33'), use_container_width=True)
-
-            col1, col2 = st.columns(2)
-            with col1:
-                st.info("Pólizas por Rango de Edad")
-                st.plotly_chart(px.bar(df_sup["RANGO_EDAD"].astype(str).value_counts().reset_index(), x="RANGO_EDAD", y="count"), use_container_width=True)
-            with col2:
-                st.info("Composición por Subcategoría")
-                st.plotly_chart(px.pie(df_sup, names="SUBCATEGORIA", values="_deuda_num", hole=0.4), use_container_width=True)
+            st.table(rank_s.style.format({"_deuda_num": "$ {:,.0f}"}))
 
     with tab_tec:
         if not df_tec.empty:
             c3, c4 = st.columns(2)
             c3.plotly_chart(kpi_grafico("Deuda Operarios", df_tec["_deuda_num"].sum()), use_container_width=True)
             c4.plotly_chart(kpi_grafico("Pólizas Operarios", len(df_tec), False), use_container_width=True)
-
-            # --- TOP 10 COMO ESTABA ANTES (TABLA) ---
             st.write("🏆 **Top 10 Operarios con Mayor Deuda**")
             top10 = df_tec.groupby("ASIGNADO_A")["_deuda_num"].sum().sort_values(ascending=False).head(10).reset_index()
-            top10.columns = ["Operario", "Deuda Acumulada"]
-            st.dataframe(top10.style.format({"Deuda Acumulada": "$ {:,.0f}"}).bar(subset=["Deuda Acumulada"], color='#28a74533'), use_container_width=True)
+            st.table(top10.style.format({"_deuda_num": "$ {:,.0f}"}))
 
-            col3, col4 = st.columns(2)
-            with col3:
+            # Gráficas de soporte
+            colA, colB = st.columns(2)
+            with colA:
                 st.info("Pólizas por Rango de Edad")
                 st.plotly_chart(px.bar(df_tec["RANGO_EDAD"].astype(str).value_counts().reset_index(), x="RANGO_EDAD", y="count"), use_container_width=True)
-            with col4:
+            with colB:
                 st.info("Composición por Subcategoría")
                 st.plotly_chart(px.pie(df_tec, names="SUBCATEGORIA", values="_deuda_num", hole=0.4), use_container_width=True)
 
