@@ -2,114 +2,240 @@ import streamlit as st
 import pandas as pd
 import io
 import plotly.express as px
-from datetime import datetime, timedelta
-import numpy as np
 
-st.set_page_config(page_title="Dashboard Intercambio UT", layout="wide")
+st.set_page_config(page_title="Dashboard Ejecutivo UT", layout="wide")
 
-st.title("📊 Dashboard - Intercambio de Pólizas Suspendidas")
-st.markdown("Lógica: Unidades **PH** mantienen seguimiento. Operarios estándar **intercambian** suspensiones.")
+st.title("📊 Dashboard Ejecutivo - Unidad de Trabajo")
 
 archivo = st.file_uploader("Sube el archivo Excel", type=["xlsx"])
 
 if archivo:
+
     df = pd.read_excel(archivo)
     df.columns = df.columns.str.strip()
 
-    # 1. Limpieza de Deuda y Fechas
-    df["_deuda_num"] = pd.to_numeric(
-        df["DEUDA_TOTAL"].astype(str).str.replace(r'[$,.]', '', regex=True), 
-        errors="coerce"
-    ).fillna(0)
+    # ================================
+    # VALIDAR COLUMNAS CLAVE
+    # ================================
+    columnas_necesarias = [
+        "RANGO_EDAD",
+        "SUBCATEGORIA",
+        "DEUDA_TOTAL",
+        "TECNICOS_INTEGRALES"
+    ]
 
-    df["FECHA_DT"] = pd.to_datetime(df["FECHA_VENCIMIENTO"], errors="coerce")
-    hoy = datetime.now()
-    inicio_semana = hoy - timedelta(days=hoy.weekday())
-    inicio_semana = inicio_semana.replace(hour=0, minute=0, second=0, microsecond=0)
+    for col in columnas_necesarias:
+        if col not in df.columns:
+            st.error(f"❌ No existe la columna: {col}")
+            st.stop()
 
-    # Identificar Unidades PH y Suspensiones de la semana
-    df["ES_PH"] = df["TECNICOS_INTEGRALES"].astype(str).str.upper().str.endswith("PH")
-    df["SUSPENDIDO_ESTA_SEMANA"] = df["FECHA_DT"] >= inicio_semana
+    # ================================
+    # LIMPIAR DEUDA PARA CALCULOS
+    # ================================
+    df["_deuda_num"] = (
+        df["DEUDA_TOTAL"]
+        .astype(str)
+        .str.replace("$", "", regex=False)
+        .str.replace(",", "", regex=False)
+        .str.replace(".", "", regex=False)
+        .str.strip()
+    )
 
-    # =========================================================
-    # LÓGICA DE INTERCAMBIO CRUZADO (SOLO NO PH)
-    # =========================================================
-    
-    # Separamos las pólizas que deben ser intercambiadas (Operarios No PH con suspensión reciente)
-    mask_para_intercambio = (df["ES_PH"] == False) & (df["SUSPENDIDO_ESTA_SEMANA"] == True)
-    
-    if mask_para_intercambio.any():
-        df_intercambio = df[mask_para_intercambio].copy()
-        
-        # Obtenemos la lista de unidades operativas que entran en el juego de intercambio
-        unidades_operativas = df_intercambio["TECNICOS_INTEGRALES"].unique().tolist()
-        
-        if len(unidades_operativas) > 1:
-            # Función para rotar las unidades (el técnico A le da al B, el B al C...)
-            def rotar_unidades(unidad_actual):
-                idx = unidades_operativas.index(unidad_actual)
-                # Pasa a la siguiente unidad en la lista, si es la última vuelve a la primera
-                nueva_unidad = unidades_operativas[(idx + 1) % len(unidades_operativas)]
-                return nueva_unidad
+    df["_deuda_num"] = pd.to_numeric(df["_deuda_num"], errors="coerce").fillna(0)
 
-            df.loc[mask_para_intercambio, "TECNICOS_INTEGRALES"] = df_intercambio["TECNICOS_INTEGRALES"].apply(rotar_unidades)
-            st.success(f"🔄 Se han intercambiado {len(df_intercambio)} pólizas entre las unidades operativas estándar.")
-        else:
-            st.warning("⚠️ Solo hay una unidad operativa estándar; no se puede realizar intercambio cruzado.")
+    # ================================
+    # SIDEBAR FILTROS
+    # ================================
+    st.sidebar.header("🎯 Filtros")
+
+    rangos = sorted(df["RANGO_EDAD"].dropna().astype(str).unique())
+    subcategorias = sorted(df["SUBCATEGORIA"].dropna().astype(str).unique())
+    tecnicos = sorted(df["TECNICOS_INTEGRALES"].dropna().astype(str).unique())
+
+    rangos_sel = st.sidebar.multiselect("Rango Edad", rangos, default=rangos)
+    sub_sel = st.sidebar.multiselect("Subcategoría", subcategorias, default=subcategorias)
+
+    deuda_minima = st.sidebar.number_input(
+        "Deudas mayores a:",
+        min_value=0,
+        value=100000,
+        step=50000
+    )
+
+    # Seleccionar todos excepto
+    st.sidebar.subheader("👥 Técnicos Integrales")
+
+    modo_exclusion = st.sidebar.checkbox("Seleccionar todos excepto")
+
+    if modo_exclusion:
+        excluir = st.sidebar.multiselect("Técnicos a excluir", tecnicos)
+        tecnicos_final = [t for t in tecnicos if t not in excluir]
     else:
-        st.info("✅ No hay suspensiones recientes en unidades operativas estándar para intercambiar.")
-
-    # =========================================================
-    # FILTRADO, ORDEN Y TOP 50
-    # =========================================================
-    df_base = df.copy()
-    
-    st.sidebar.header("🎯 Filtros Finales")
-    tecnicos = sorted(df_base["TECNICOS_INTEGRALES"].dropna().astype(str).unique())
-    tecnicos_sel = st.sidebar.multiselect("Técnicos a Visualizar", tecnicos, default=tecnicos)
-
-    df_filtrado = df_base[df_base["TECNICOS_INTEGRALES"].isin(tecnicos_sel)].copy()
-    
-    # Ordenar por deuda y limitar a 50 por técnico
-    df_filtrado = df_filtrado.sort_values(by="_deuda_num", ascending=False)
-    df_filtrado = df_filtrado.groupby("TECNICOS_INTEGRALES").head(50).reset_index(drop=True)
-
-    # Formatear fechas para el reporte
-    for col in ["FECHA_VENCIMIENTO", "ULT_FECHAPAGO", "FECHA_ASIGNACION"]:
-        if col in df_filtrado.columns:
-            df_filtrado[col] = pd.to_datetime(df_filtrado[col], errors="coerce").dt.strftime("%d/%m/%Y")
-
-    # ================================
-    # VISTAS Y DESCARGA
-    # ================================
-    tab1, tab2 = st.tabs(["📋 Tabla Intercambiada", "📊 Resumen"])
-
-    with tab1:
-        cols_finales = [c for c in df_filtrado.columns if not c.startswith(('_', 'ES_PH', 'SUSPENDIDO', 'FECHA_DT'))]
-        st.dataframe(df_filtrado[cols_finales], use_container_width=True)
-
-        output = io.BytesIO()
-        with pd.ExcelWriter(output, engine="openpyxl") as writer:
-            df_filtrado[cols_finales].to_excel(writer, index=False)
-        output.seek(0)
-        
-        st.download_button(
-            label="📥 Descargar Excel con Intercambio",
-            data=output,
-            file_name=f"Asignacion_Cruzada_{datetime.now().strftime('%d_%m')}.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        tecnicos_final = st.sidebar.multiselect(
+            "Técnicos a incluir",
+            tecnicos,
+            default=tecnicos
         )
 
+    st.sidebar.markdown(f"📊 Técnicos activos: {len(tecnicos_final)}")
+
+    if st.sidebar.button("Limpiar filtros"):
+        st.experimental_rerun()
+
+    # ================================
+    # FILTRAR DATA
+    # ================================
+    df_filtrado = df[
+        (df["RANGO_EDAD"].astype(str).isin(rangos_sel)) &
+        (df["SUBCATEGORIA"].astype(str).isin(sub_sel)) &
+        (df["_deuda_num"] >= deuda_minima) &
+        (df["TECNICOS_INTEGRALES"].astype(str).isin(tecnicos_final))
+    ].copy()
+
+    df_filtrado = df_filtrado.sort_values(by="_deuda_num", ascending=False)
+
+    # Limitar 50 por técnico
+    df_filtrado = (
+        df_filtrado
+        .groupby("TECNICOS_INTEGRALES")
+        .head(50)
+        .reset_index(drop=True)
+    )
+
+    # ================================
+    # FORMATEAR FECHAS (SIN HORA)
+    # ================================
+    columnas_fecha = [
+        "FECHA_VENCIMIENTO",
+        "ULT_FECHAPAGO",
+        "FECHA_ASIGNACION"
+    ]
+
+    for col in columnas_fecha:
+        if col in df_filtrado.columns:
+            df_filtrado[col] = pd.to_datetime(
+                df_filtrado[col],
+                errors="coerce"
+            ).dt.strftime("%d/%m/%Y")
+
+    # ================================
+    # TABS
+    # ================================
+    tab1, tab2 = st.tabs(["📋 Tabla", "📊 Dashboard"])
+
+    # ================================
+    # TABLA + DESCARGA EXCEL
+    # ================================
+    with tab1:
+
+        st.success(f"Total pólizas: {len(df_filtrado)}")
+        st.dataframe(df_filtrado, use_container_width=True)
+
+        if not df_filtrado.empty:
+
+            output = io.BytesIO()
+            df_export = df_filtrado.copy()
+
+            columnas_moneda = [
+                "ULT_PAGO",
+                "VALOR_ULTFACT",
+                "DEUDA_TOTAL"
+            ]
+
+            # Convertir a número real
+            for col in columnas_moneda:
+                if col in df_export.columns:
+                    df_export[col] = (
+                        df_export[col]
+                        .astype(str)
+                        .str.replace("$", "", regex=False)
+                        .str.replace(",", "", regex=False)
+                        .str.replace(".", "", regex=False)
+                        .str.strip()
+                    )
+                    df_export[col] = pd.to_numeric(df_export[col], errors="coerce").fillna(0)
+
+            df_export = df_export.drop(columns=["_deuda_num"], errors="ignore")
+
+            with pd.ExcelWriter(output, engine="openpyxl") as writer:
+                df_export.to_excel(writer, index=False, sheet_name="Reporte")
+
+                workbook = writer.book
+                worksheet = writer.sheets["Reporte"]
+
+                for col in columnas_moneda:
+                    if col in df_export.columns:
+                        col_idx = df_export.columns.get_loc(col) + 1
+                        for row in range(2, len(df_export) + 2):
+                            worksheet.cell(row=row, column=col_idx).number_format = '"$"#,##0'
+
+            output.seek(0)
+
+            st.download_button(
+                "📥 Descargar archivo",
+                data=output,
+                file_name="resultado_filtrado.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            )
+
+    # ================================
+    # DASHBOARD
+    # ================================
     with tab2:
-        col1, col2 = st.columns(2)
-        with col1:
-            st.metric("Pólizas en PH (Sin cambios)", len(df_filtrado[df_filtrado["TECNICOS_INTEGRALES"].str.endswith("PH")]))
-        with col2:
-            st.metric("Pólizas Intercambiadas", mask_para_intercambio.sum())
-        
-        fig = px.bar(df_filtrado["TECNICOS_INTEGRALES"].value_counts().reset_index(), 
-                     x="TECNICOS_INTEGRALES", y="count", title="Pólizas Finales por Unidad")
+
+        col1, col2, col3 = st.columns(3)
+
+        col1.metric("Total Pólizas", len(df_filtrado))
+        col2.metric("Total Deuda", f"$ {df_filtrado['_deuda_num'].sum():,.0f}")
+        col3.metric("Técnicos Activos", df_filtrado["TECNICOS_INTEGRALES"].nunique())
+
+        st.divider()
+
+        # Top 10 técnicos
+        st.subheader("🏆 Top 10 Técnicos con Mayor Deuda")
+
+        top10 = (
+            df_filtrado
+            .groupby("TECNICOS_INTEGRALES")["_deuda_num"]
+            .sum()
+            .sort_values(ascending=False)
+            .head(10)
+            .reset_index()
+        )
+
+        top10.columns = ["Técnico", "Total Deuda"]
+        top10["Total Deuda"] = top10["Total Deuda"].apply(lambda x: f"$ {x:,.0f}")
+
+        st.dataframe(top10, use_container_width=True)
+
+        # Gráfica Rango Edad
+        st.subheader("📊 Pólizas por Rango de Edad")
+
+        conteo = df_filtrado["RANGO_EDAD"].astype(str).value_counts().reset_index()
+        conteo.columns = ["Rango Edad", "Cantidad"]
+
+        fig = px.bar(
+            conteo,
+            x="Rango Edad",
+            y="Cantidad",
+            text_auto=True
+        )
+
         st.plotly_chart(fig, use_container_width=True)
 
+        # Pie Subcategoría
+        st.subheader("🥧 Distribución por Subcategoría")
+
+        conteo_sub = df_filtrado["SUBCATEGORIA"].value_counts().reset_index()
+        conteo_sub.columns = ["Subcategoría", "Cantidad"]
+
+        fig2 = px.pie(
+            conteo_sub,
+            names="Subcategoría",
+            values="Cantidad"
+        )
+
+        st.plotly_chart(fig2, use_container_width=True)
+
 else:
-    st.info("👆 Sube el archivo Excel para procesar el intercambio de operarios.")
+    st.info("👆 Sube un archivo para comenzar.")
