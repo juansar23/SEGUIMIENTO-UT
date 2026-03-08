@@ -22,7 +22,7 @@ st.markdown("""
     </style>
     """, unsafe_allow_html=True)
 
-st.title("🚀 Sistema ITA - Asignación por Barrio y PH")
+st.title("🚀 Sistema ITA - Gestión PH (Continuidad) y Operativa (Rotación)")
 
 SUPERVISORES_NOMINA = [
     "FAVIO ERNESTO VASQUEZ ROMERO", "DEGUIN ZOCRATE DEGUIN ZOCRATE",
@@ -46,7 +46,7 @@ if archivo:
     df["_deuda_num"] = pd.to_numeric(df["_deuda_num"], errors="coerce").fillna(0)
 
     # Sidebar
-    st.sidebar.header("🎯 Filtros")
+    st.sidebar.header("🎯 Panel de Control")
     opciones_edad = sorted(df["RANGO_EDAD"].dropna().astype(str).unique())
     opciones_sub = sorted(df["SUBCATEGORIA"].dropna().astype(str).unique())
     tecs_disponibles = sorted(df["TECNICOS_INTEGRALES"].dropna().astype(str).unique())
@@ -55,7 +55,7 @@ if archivo:
     sub_sel = st.sidebar.multiselect("Subcategoría", opciones_sub, default=opciones_sub)
     deuda_minima = st.sidebar.number_input("Deuda mínima ($)", value=100000)
     sups_final = st.sidebar.multiselect("Supervisores", SUPERVISORES_NOMINA, default=SUPERVISORES_NOMINA)
-    tecs_final = st.sidebar.multiselect("Operarios", tecs_disponibles, default=tecs_disponibles)
+    tecs_final = st.sidebar.multiselect("Técnicos Activos", tecs_disponibles, default=tecs_disponibles)
 
     # 1. Base Filtrada
     df_base = df[
@@ -64,7 +64,7 @@ if archivo:
         (df["_deuda_num"] >= deuda_minima)
     ].copy()
 
-    # 2. Asignación Supervisores (8 mejores por supervisor y bloquean barrios)
+    # 2. Asignación Supervisores
     df_base = df_base.sort_values("_deuda_num", ascending=False)
     df_sup = df_base.head(len(sups_final) * 8).copy()
     barrios_bloqueados = set()
@@ -84,14 +84,11 @@ if archivo:
     conteo_polizas = {t: 0 for t in tecs_final}
     asignaciones_finales = []
 
-    # --- NUEVO MOTOR DE ASIGNACIÓN POR BARRIO ---
-    # Agrupamos por barrio para entregar bloques completos
+    # --- MOTOR DE ASIGNACIÓN (CORREGIDO: PH REPITE, STD ROTAN) ---
     barrios_grupos = df_disp.groupby(col_barrio)
-    # Ordenar barrios por volumen de deuda para asignar lo más importante primero
     barrios_ordenados = sorted(barrios_grupos, key=lambda x: x[1]["_deuda_num"].sum(), reverse=True)
 
     for nombre_barrio, datos_barrio in barrios_ordenados:
-        # Separar pólizas PH y Estándar dentro del barrio
         for tipo_clase in ["PH", "STD"]:
             if tipo_clase == "PH":
                 pols_barrio = datos_barrio[datos_barrio["TECNICOS_INTEGRALES"].str.contains("PH", na=False, case=False)]
@@ -103,22 +100,27 @@ if archivo:
             if pols_barrio.empty: continue
 
             for idx, row in pols_barrio.iterrows():
-                # Buscar técnico del grupo correcto que NO sea el anterior y tenga cupo
-                candidatos_validos = [
-                    t for t in candidatos_grupo 
-                    if conteo_polizas[t] < 50 and t != row["TECNICOS_INTEGRALES"]
-                ]
+                # REGLAS DE ASIGNACIÓN
+                if tipo_clase == "PH":
+                    # PH: PUEDE REPETIR su propia póliza (Continuidad)
+                    validos = [t for t in candidatos_grupo if conteo_polizas[t] < 50]
+                else:
+                    # STD (Operativa): PROHIBIDO REPETIR (Rotación/Transparencia)
+                    validos = [t for t in candidatos_grupo if conteo_polizas[t] < 50 and t != row["TECNICOS_INTEGRALES"]]
                 
-                if candidatos_validos:
-                    # Intentamos mantener el mismo técnico para el mismo barrio
-                    # Buscamos si alguno de los válidos ya tiene algo asignado en este barrio
-                    ya_en_barrio = [t for t in candidatos_validos if any(a['ASIGNADO_A'] == t and a[col_barrio] == nombre_barrio for a in asignaciones_finales)]
+                if validos:
+                    # 1. Si es PH, intentar primero asignar al que ya tiene la póliza
+                    original_ph = [t for t in validos if t == row["TECNICOS_INTEGRALES"]]
                     
-                    if ya_en_barrio:
+                    # 2. Intentar mantener el mismo técnico en el mismo barrio
+                    ya_en_barrio = [t for t in validos if any(a['ASIGNADO_A'] == t and a[col_barrio] == nombre_barrio for a in asignaciones_finales)]
+                    
+                    if tipo_clase == "PH" and original_ph:
+                        elegido = original_ph[0]
+                    elif ya_en_barrio:
                         elegido = ya_en_barrio[0]
                     else:
-                        # Si nadie del barrio está, tomamos al que menos carga tenga
-                        elegido = min(candidatos_validos, key=lambda x: conteo_polizas[x])
+                        elegido = min(validos, key=lambda x: conteo_polizas[x])
                     
                     nueva = row.copy()
                     nueva["ASIGNADO_A"] = elegido
@@ -146,35 +148,32 @@ if archivo:
         st.dataframe(df_final.drop(columns=["_deuda_num"]), use_container_width=True)
         output = io.BytesIO()
         with pd.ExcelWriter(output, engine="openpyxl") as writer:
-            df_final.drop(columns=["_deuda_num"]).to_excel(writer, index=False, sheet_name="Plan")
-        st.download_button("📥 Descargar Plan de Trabajo", data=output.getvalue(), file_name="plan_ita_zonificado.xlsx")
+            df_final.drop(columns=["_deuda_num"]).to_excel(writer, index=False, sheet_name="Plan_Final")
+        st.download_button("📥 Descargar Plan de Trabajo", data=output.getvalue(), file_name="plan_ita_corregido.xlsx")
 
     with tab_sup:
         if not df_sup.empty:
             c1, c2 = st.columns(2)
             c1.plotly_chart(kpi_grafico("Deuda Supervisión", df_sup["_deuda_num"].sum()), use_container_width=True)
             c2.plotly_chart(kpi_grafico("Pólizas Supervisión", len(df_sup), False), use_container_width=True)
-            st.write("🏆 **Ranking de Supervisores (Tabla)**")
-            rank_s = df_sup.groupby("ASIGNADO_A")["_deuda_num"].sum().sort_values(ascending=False).reset_index()
-            st.table(rank_s.style.format({"_deuda_num": "$ {:,.0f}"}))
+            st.write("🏆 **Ranking de Supervisores**")
+            st.table(df_sup.groupby("ASIGNADO_A")["_deuda_num"].sum().sort_values(ascending=False).reset_index().style.format({"_deuda_num": "$ {:,.0f}"}))
 
     with tab_tec:
         if not df_tec.empty:
             c3, c4 = st.columns(2)
             c3.plotly_chart(kpi_grafico("Deuda Operarios", df_tec["_deuda_num"].sum()), use_container_width=True)
             c4.plotly_chart(kpi_grafico("Pólizas Operarios", len(df_tec), False), use_container_width=True)
-            st.write("🏆 **Top 10 Operarios con Mayor Deuda**")
-            top10 = df_tec.groupby("ASIGNADO_A")["_deuda_num"].sum().sort_values(ascending=False).head(10).reset_index()
-            st.table(top10.style.format({"_deuda_num": "$ {:,.0f}"}))
-
-            # Gráficas de soporte
+            st.write("🏆 **Top 10 Operarios (Mayor Deuda)**")
+            st.table(df_tec.groupby("ASIGNADO_A")["_deuda_num"].sum().sort_values(ascending=False).head(10).reset_index().style.format({"_deuda_num": "$ {:,.0f}"}))
+            
             colA, colB = st.columns(2)
             with colA:
-                st.info("Pólizas por Rango de Edad")
+                st.info("📊 Cantidad por Rango Edad")
                 st.plotly_chart(px.bar(df_tec["RANGO_EDAD"].astype(str).value_counts().reset_index(), x="RANGO_EDAD", y="count"), use_container_width=True)
             with colB:
-                st.info("Composición por Subcategoría")
+                st.info("🥧 Composición Subcategoría")
                 st.plotly_chart(px.pie(df_tec, names="SUBCATEGORIA", values="_deuda_num", hole=0.4), use_container_width=True)
 
 else:
-    st.info("👋 Sube el Excel para procesar.")
+    st.info("👋 Sube el archivo Excel para procesar con las reglas PH corregidas.")
