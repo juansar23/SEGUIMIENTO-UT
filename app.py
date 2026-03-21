@@ -83,18 +83,43 @@ if archivo:
             (df[col_tecnico].isin(tecnicos_final))
         ].copy()
 
-        # 4. LÓGICA DE PROCESAMIENTO (PH vs RUTA)
+        # 4. LÓGICA DE PROCESAMIENTO (PH vs RUTA CONCENTRADA)
         unidades_ph = ["ITA SUSPENSION BQ 15 PH", "ITA SUSPENSION BQ 31 PH", "ITA SUSPENSION BQ 32 PH", 
                        "ITA SUSPENSION BQ 34 PH", "ITA SUSPENSION BQ 35 PH", "ITA SUSPENSION BQ 36 PH", "ITA SUSPENSION BQ 37 PH"]
 
+        # Lógica PH (Mantiene prioridad de Deuda)
         df_ph = df_base[df_base[col_tecnico].isin(unidades_ph)].copy()
         df_ph_final = df_ph.sort_values(by="_deuda_num", ascending=False).groupby(col_tecnico).head(50)
 
+        # Lógica Otros (CONCENTRACIÓN POR BARRIO)
         df_otros = df_base[~df_base[col_tecnico].isin(unidades_ph)].copy()
         lista_rutas = []
+        
         for tec, grupo in df_otros.groupby(col_tecnico):
-            ordenado = grupo.sort_values(by=[col_ciclo, col_barrio, col_direccion])
-            lista_rutas.append(ordenado.head(50))
+            # 1. Identificar orden de barrios por volumen (donde más tiene el técnico)
+            orden_barrios = grupo[col_barrio].value_counts().index.tolist()
+            
+            acumulado_tec = []
+            contador = 0
+            
+            # 2. Agotar barrio por barrio antes de saltar al siguiente
+            for barrio in orden_barrios:
+                if contador >= 50:
+                    break
+                
+                espacio_libre = 50 - contador
+                # Dentro del barrio, ordenamos por Ciclo y Dirección para optimizar la caminata
+                df_barrio = (
+                    grupo[grupo[col_barrio] == barrio]
+                    .sort_values(by=[col_ciclo, col_direccion])
+                    .head(espacio_libre)
+                )
+                
+                acumulado_tec.append(df_barrio)
+                contador += len(df_barrio)
+            
+            if acumulado_tec:
+                lista_rutas.append(pd.concat(acumulado_tec))
         
         df_resultado = pd.concat([df_ph_final] + lista_rutas, ignore_index=True) if (not df_ph_final.empty or lista_rutas) else pd.DataFrame()
 
@@ -102,7 +127,7 @@ if archivo:
         tab1, tab2 = st.tabs(["📋 Tabla de Asignación", "📊 Dashboard Ejecutivo"])
 
         with tab1:
-            st.success(f"✅ Se han asignado {len(df_resultado)} pólizas optimizadas.")
+            st.success(f"✅ Se han asignado {len(df_resultado)} pólizas (Priorizando concentración por barrio).")
             st.dataframe(df_resultado.drop(columns=["_deuda_num"]), use_container_width=True)
 
             if not df_resultado.empty:
@@ -123,7 +148,7 @@ if archivo:
 
             col_l, col_r = st.columns(2)
             with col_l:
-                # REQUERIMIENTO: TOP 10 EN TABLA
+                # TOP 10 EN TABLA
                 st.subheader("🏆 Top 10 Técnicos (Mayor Deuda)")
                 top_deuda = (
                     df_resultado.groupby(col_tecnico)["_deuda_num"]
@@ -133,7 +158,6 @@ if archivo:
                     .reset_index()
                 )
                 top_deuda.columns = ["Técnico", "Deuda Total"]
-                # Formatear la deuda para lectura fácil
                 top_deuda["Deuda Total"] = top_deuda["Deuda Total"].apply(lambda x: f"$ {x:,.0f}")
                 st.table(top_deuda) 
 
@@ -149,4 +173,4 @@ if archivo:
     except Exception as e:
         st.error(f"❌ Error al procesar: {e}")
 else:
-    st.info("👆 Por favor, sube el archivo Excel para comenzar.")
+    st.info("👆 Sube el archivo Excel para organizar las rutas por concentración de barrio.")
