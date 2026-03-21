@@ -11,10 +11,10 @@ st.title("📊 Dashboard Ejecutivo - Optimización Logística")
 # --- SIDEBAR: CONFIGURACIÓN Y FILTROS ---
 st.sidebar.header("⚙️ Configuración y Filtros")
 
-# Soporte extendido para formatos (incluyendo el .xls de tus imágenes)
+# Soporte para archivos .xls antiguos y .xlsx modernos
 archivo = st.sidebar.file_uploader("Sube el archivo de Seguimiento", type=["xls", "xlsx", "xlsm", "xlsb"])
 
-# Nombres de columnas según tus capturas
+# Nombres de columnas ajustados
 col_barrio = "BARRIO"
 col_ciclo = "CICLO_FACTURACION"
 col_direccion = "DIRECCION"
@@ -55,11 +55,9 @@ if archivo:
         # 3. FILTROS DINÁMICOS EN SIDEBAR
         st.sidebar.subheader("🎯 Criterios de Selección")
         
-        # Filtro de Ciclos (Solicitado)
         ciclos_disp = sorted(df[col_ciclo].unique())
         ciclos_sel = st.sidebar.multiselect("Ciclo Facturación", ciclos_disp, default=ciclos_disp)
         
-        # Filtros de Edad y Subcategoría
         rangos_sel = st.sidebar.multiselect("Rango Edad", sorted(df[col_edad].unique()), default=df[col_edad].unique())
         sub_sel = st.sidebar.multiselect("Subcategoría", sorted(df[col_subcat].unique()), default=df[col_subcat].unique())
         
@@ -89,11 +87,9 @@ if archivo:
         unidades_ph = ["ITA SUSPENSION BQ 15 PH", "ITA SUSPENSION BQ 31 PH", "ITA SUSPENSION BQ 32 PH", 
                        "ITA SUSPENSION BQ 34 PH", "ITA SUSPENSION BQ 35 PH", "ITA SUSPENSION BQ 36 PH", "ITA SUSPENSION BQ 37 PH"]
 
-        # Lógica PH (Deuda)
         df_ph = df_base[df_base[col_tecnico].isin(unidades_ph)].copy()
         df_ph_final = df_ph.sort_values(by="_deuda_num", ascending=False).groupby(col_tecnico).head(50)
 
-        # Lógica Otros (Ruta: Ciclo -> Barrio -> Dirección)
         df_otros = df_base[~df_base[col_tecnico].isin(unidades_ph)].copy()
         lista_rutas = []
         for tec, grupo in df_otros.groupby(col_tecnico):
@@ -109,7 +105,6 @@ if archivo:
             st.success(f"✅ Se han asignado {len(df_resultado)} pólizas optimizadas.")
             st.dataframe(df_resultado.drop(columns=["_deuda_num"]), use_container_width=True)
 
-            # Botón de Descarga con Formato Excel
             if not df_resultado.empty:
                 output = io.BytesIO()
                 with pd.ExcelWriter(output, engine="openpyxl") as writer:
@@ -128,10 +123,19 @@ if archivo:
 
             col_l, col_r = st.columns(2)
             with col_l:
-                st.subheader("💰 Top 10 Deuda por Técnico")
-                top_deuda = df_resultado.groupby(col_tecnico)["_deuda_num"].sum().sort_values(ascending=False).head(10).reset_index()
-                fig1 = px.bar(top_deuda, x=col_tecnico, y="_deuda_num", text_auto='.2s', color="_deuda_num")
-                st.plotly_chart(fig1, use_container_width=True)
+                # REQUERIMIENTO: TOP 10 EN TABLA
+                st.subheader("🏆 Top 10 Técnicos (Mayor Deuda)")
+                top_deuda = (
+                    df_resultado.groupby(col_tecnico)["_deuda_num"]
+                    .sum()
+                    .sort_values(ascending=False)
+                    .head(10)
+                    .reset_index()
+                )
+                top_deuda.columns = ["Técnico", "Deuda Total"]
+                # Formatear la deuda para lectura fácil
+                top_deuda["Deuda Total"] = top_deuda["Deuda Total"].apply(lambda x: f"$ {x:,.0f}")
+                st.table(top_deuda) 
 
             with col_r:
                 st.subheader("🥧 Distribución por Subcategoría")
@@ -145,4 +149,4 @@ if archivo:
     except Exception as e:
         st.error(f"❌ Error al procesar: {e}")
 else:
-    st.info("👆 Por favor, sube el archivo Excel (97-2003 o moderno) para comenzar.")
+    st.info("👆 Por favor, sube el archivo Excel para comenzar.")
