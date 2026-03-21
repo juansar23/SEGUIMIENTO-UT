@@ -6,8 +6,8 @@ st.set_page_config(page_title="Dashboard Ejecutivo UT", layout="wide")
 
 st.title("📊 Dashboard Ejecutivo - Optimización Logística")
 
-# Configuración para aceptar ambos formatos
-archivo = st.file_uploader("Sube el archivo Excel (97-2003 o Moderno)", type=["xls", "xlsx"])
+# Esta línea le dice al navegador que muestre archivos .xls y .xlsx en la ventana de búsqueda
+archivo = st.file_uploader("Sube el archivo Excel", type=["xls", "xlsx"])
 
 col_barrio = "BARRIO"  # Asegúrate de que este nombre sea igual en tu Excel
 
