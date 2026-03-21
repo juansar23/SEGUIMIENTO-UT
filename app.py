@@ -8,22 +8,22 @@ st.set_page_config(page_title="Dashboard Ejecutivo UT", layout="wide")
 st.title("📊 Dashboard Ejecutivo - Optimización Logística")
 st.markdown("---")
 
-# Cambia tu línea actual por esta:
-archivo = st.file_uploader("Sube el archivo Excel", type=["xlsx"])
+# CORRECCIÓN CLAVE: Ahora acepta ambos formatos para evitar el error de bloqueo
+archivo = st.file_uploader("Sube el archivo Excel", type=["xlsx", "xls"])
 
 # Nombre de la columna del barrio (Ajustar si es diferente en tu Excel)
 col_barrio = "BARRIO" 
 
 if archivo:
     try:
-        # Detectar motor según extensión
+        # Detectar motor según extensión para archivos modernos o antiguos (97-2003)
         if archivo.name.lower().endswith(".xls"):
             df = pd.read_excel(archivo, engine="xlrd")
         else:
             df = pd.read_excel(archivo, engine="openpyxl")
 
         # Limpieza inicial de nombres de columnas
-        df.columns = df.columns.str.strip()
+        df.columns = df.columns.str.strip() 
         
         # Validar columnas necesarias
         cols_necesarias = ["TECNICOS_INTEGRALES", "DEUDA_TOTAL", col_barrio]
@@ -55,7 +55,7 @@ if archivo:
             "ITA SUSPENSION BQ 37 PH"
         ]
 
-        # --- LÓGICA 1: Unidades PH (Imagen) -> Top 50 Deuda Pura ---
+        # --- LÓGICA 1: Unidades PH -> Top 50 Deuda Pura ---
         df_ita = df[df["TECNICOS_INTEGRALES"].isin(unidades_ita_ph)].copy()
         df_ita_final = (
             df_ita.sort_values(by="_deuda_num", ascending=False)
@@ -127,4 +127,4 @@ if archivo:
         st.info("Asegúrate de haber instalado 'xlrd' para leer archivos .xls antiguos.")
 
 else:
-    st.info("👆 Por favor, sube el archivo de Seguimiento para comenzar. El sistema detectará automáticamente los barrios y las unidades especiales.")
+    st.info("👆 Por favor, sube el archivo de Seguimiento (.xls o .xlsx) para comenzar.")
