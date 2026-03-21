@@ -9,7 +9,7 @@ st.title("📊 Dashboard Ejecutivo - Optimización Logística")
 st.markdown("---")
 
 # Cambia tu línea actual por esta:
-archivo = st.file_uploader("Sube el archivo Excel", type=["xls", "xlsx", "xlsm", "xlsb"])
+archivo = st.file_uploader("Sube el archivo Excel", type=["xlsx"])
 
 # Nombre de la columna del barrio (Ajustar si es diferente en tu Excel)
 col_barrio = "BARRIO" 
