@@ -8,11 +8,8 @@ st.set_page_config(page_title="Dashboard Ejecutivo UT", layout="wide")
 st.title("📊 Dashboard Ejecutivo - Optimización Logística")
 st.markdown("---")
 
-# 1. CARGADOR DE ARCHIVOS (Configurado para mostrar .xls y .xlsx)
-archivo = st.file_uploader(
-    "Selecciona tu archivo de Seguimiento (Formato .xls o .xlsx)", 
-    type=["xls", "xlsx"]
-)
+# Cambia tu línea actual por esta:
+archivo = st.file_uploader("Sube el archivo Excel", type=["xls", "xlsx", "xlsm", "xlsb"])
 
 # Nombre de la columna del barrio (Ajustar si es diferente en tu Excel)
 col_barrio = "BARRIO" 
