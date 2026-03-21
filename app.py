@@ -3,135 +3,127 @@ import pandas as pd
 import io
 import plotly.express as px
 
-# Configuración de la página
 st.set_page_config(page_title="Dashboard Ejecutivo UT", layout="wide")
+st.title("📊 Dashboard Ejecutivo - Asignación por Bloque de Barrio")
 
-st.title("📊 Dashboard Ejecutivo - Optimización Logística")
+archivo = st.sidebar.file_uploader("Sube el archivo (.xls, .xlsx)", type=["xls", "xlsx", "xlsm", "xlsb"])
 
-# --- SIDEBAR: CONFIGURACIÓN Y FILTROS ---
-st.sidebar.header("⚙️ Configuración y Filtros")
-
-# Soporte para archivos .xls antiguos y .xlsx modernos
-archivo = st.sidebar.file_uploader("Sube el archivo de Seguimiento", type=["xls", "xlsx", "xlsm", "xlsb"])
-
-# Nombres de columnas según tus archivos
+# Configuración de columnas según tus capturas
 col_barrio = "BARRIO"
 col_ciclo = "CICLO_FACTURACION"
 col_direccion = "DIRECCION"
 col_tecnico = "TECNICOS_INTEGRALES"
 col_deuda = "DEUDA_TOTAL"
-col_edad = "RANGO_EDAD"
-col_subcat = "SUBCATEGORIA"
 
 if archivo:
     try:
-        # LECTURA DE DATOS
         if archivo.name.lower().endswith(".xls"):
             df = pd.read_excel(archivo, engine="xlrd")
         else:
             df = pd.read_excel(archivo, engine="openpyxl")
 
         df.columns = df.columns.str.strip()
-
-        # Limpieza de Deuda
+        
+        # Limpieza de deuda para el Top 10
         df["_deuda_num"] = (
             df[col_deuda].astype(str)
-            .str.replace("$", "", regex=False)
-            .str.replace(",", "", regex=False)
+            .str.replace("$", "", regex=False).str.replace(",", "", regex=False)
             .str.replace(".", "", regex=False).str.strip()
         )
         df["_deuda_num"] = pd.to_numeric(df["_deuda_num"], errors="coerce").fillna(0)
 
-        # FILTROS
-        ciclos_disp = sorted(df[col_ciclo].unique())
-        ciclos_sel = st.sidebar.multiselect("Ciclo Facturación", ciclos_disp, default=ciclos_disp)
+        # Filtros Sidebar
+        ciclos_disp = sorted(df[col_ciclo].astype(str).unique())
+        ciclos_sel = st.sidebar.multiselect("Ciclos", ciclos_disp, default=ciclos_disp)
         
         todos_tecnicos = sorted(df[col_tecnico].astype(str).unique())
-        modo_exclusion = st.sidebar.checkbox("Seleccionar todos excepto")
-        if modo_exclusion:
-            excluir = st.sidebar.multiselect("Excluir técnicos:", todos_tecnicos)
-            tecnicos_final = [t for t in todos_tecnicos if t not in excluir]
-        else:
-            tecnicos_final = st.sidebar.multiselect("Incluir técnicos:", todos_tecnicos, default=todos_tecnicos)
+        tecnicos_sel = st.sidebar.multiselect("Técnicos a Procesar", todos_tecnicos, default=todos_tecnicos)
 
-        # Aplicar filtros base
-        df_base = df[
-            (df[col_ciclo].isin(ciclos_sel)) & 
-            (df[col_tecnico].isin(tecnicos_final))
-        ].copy()
+        # Dataset Filtrado
+        df_pool = df[(df[col_ciclo].astype(str).isin(ciclos_sel)) & (df[col_tecnico].isin(tecnicos_sel))].copy()
 
-        # --- LÓGICA DE ASIGNACIÓN CONCENTRADA (EVITAR DIVIDIR BARRIOS) ---
+        # =========================================================
+        # NUEVA LÓGICA: ASIGNACIÓN PRIORITARIA POR BARRIO (BLOQUE)
+        # =========================================================
+        # 1. Separar PH (Lógica de Deuda)
         unidades_ph = ["ITA SUSPENSION BQ 15 PH", "ITA SUSPENSION BQ 31 PH", "ITA SUSPENSION BQ 32 PH", 
                        "ITA SUSPENSION BQ 34 PH", "ITA SUSPENSION BQ 35 PH", "ITA SUSPENSION BQ 36 PH", "ITA SUSPENSION BQ 37 PH"]
-
-        # 1. PH mantienen su lógica de mayor deuda
-        df_ph = df_base[df_base[col_tecnico].isin(unidades_ph)].copy()
-        df_ph_final = df_ph.sort_values(by="_deuda_num", ascending=False).groupby(col_tecnico).head(50)
-
-        # 2. Otros: Priorizar que un barrio se quede con un solo técnico
-        df_otros = df_base[~df_base[col_tecnico].isin(unidades_ph)].copy()
-        lista_rutas = []
         
-        # Pólizas ya asignadas para no repetir
-        pólizas_asignadas_ids = set()
+        df_ph_final = df_pool[df_pool[col_tecnico].isin(unidades_ph)].sort_values(by="_deuda_num", ascending=False).groupby(col_tecnico).head(50)
 
-        for tec in tecnicos_final:
-            if tec in unidades_ph: continue
-            
-            grupo_tec = df_otros[df_otros[col_tecnico] == tec]
-            # Ordenar barrios por donde el técnico tiene más trabajo originalmente
-            barrios_prioritarios = grupo_tec[col_barrio].value_counts().index.tolist()
-            
+        # 2. Otros (Lógica de Concentración Geográfica Total)
+        df_otros = df_pool[~df_pool[col_tecnico].isin(unidades_ph)].copy()
+        
+        # Ordenamos todo el pool por Ciclo y Barrio para que los bloques estén juntos
+        df_otros = df_otros.sort_values(by=[col_ciclo, col_barrio, col_direccion])
+        
+        lista_final_otros = []
+        pols_asignadas_indices = set()
+
+        for tec in [t for t in tecnicos_sel if t not in unidades_ph]:
+            cupo_restante = 50
             acumulado_tec = []
-            contador = 0
             
-            for barrio in barrios_prioritarios:
-                if contador >= 50: break
-                
-                # Buscar todas las pólizas disponibles de ese barrio (que no hayan sido tomadas)
-                pólizas_barrio = df_otros[
-                    (df_otros[col_barrio] == barrio) & 
-                    (~df_otros.index.isin(pólizas_asignadas_ids))
-                ].sort_values(by=[col_ciclo, col_direccion])
-                
-                espacio_en_cupo = 50 - contador
-                toma_barrio = pólizas_barrio.head(espacio_en_cupo)
-                
-                if not toma_barrio.empty:
-                    acumulado_tec.append(toma_barrio)
-                    pólizas_asignadas_ids.update(toma_barrio.index)
-                    contador += len(toma_barrio)
+            # Buscamos el barrio más frecuente que aún tenga pólizas para este técnico
+            # o seguimos el orden de ruta lógica para no saltar por toda la ciudad
+            pols_disponibles = df_otros[~df_otros.index.isin(pols_asignadas_indices)]
             
+            if pols_disponibles.empty:
+                continue
+
+            # Tomamos el primer barrio disponible en la ruta lógica
+            barrio_actual = pols_disponibles.iloc[0][col_barrio]
+            
+            while cupo_restante > 0:
+                # Intentamos tomar TODAS las del barrio actual para este técnico
+                pols_del_barrio = pols_disponibles[pols_disponibles[col_barrio] == barrio_actual].head(cupo_restante)
+                
+                if not pols_del_barrio.empty:
+                    acumulado_tec.append(pols_del_barrio)
+                    pols_asignadas_indices.update(pols_del_barrio.index)
+                    cupo_restante -= len(pols_del_barrio)
+                    
+                    # Actualizar disponibles para el siguiente ciclo del while
+                    pols_disponibles = df_otros[~df_otros.index.isin(pols_asignadas_indices)]
+                
+                if pols_disponibles.empty or cupo_restante <= 0:
+                    break
+                
+                # Si aún queda cupo, saltamos al SIGUIENTE barrio disponible en la lista ordenada
+                barrio_actual = pols_disponibles.iloc[0][col_barrio]
+
             if acumulado_tec:
-                lista_rutas.append(pd.concat(acumulado_tec))
+                df_tec_final = pd.concat(acumulado_tec)
+                df_tec_final[col_tecnico] = tec # Re-asignamos al técnico actual
+                lista_final_otros.append(df_tec_final)
 
-        df_resultado = pd.concat([df_ph_final] + lista_rutas, ignore_index=True)
+        df_resultado = pd.concat([df_ph_final] + lista_final_otros, ignore_index=True)
 
-        # --- VISUALIZACIÓN ---
-        tab1, tab2 = st.tabs(["📋 Tabla de Asignación", "📊 Dashboard"])
+        # =========================================================
+        # VISUALIZACIÓN
+        # =========================================================
+        tab1, tab2 = st.tabs(["📋 Tabla y Descarga", "📊 Dashboard"])
 
         with tab1:
-            st.success(f"✅ Optimización: Barrios como BELLARENA ahora se asignan prioritariamente a un solo técnico.")
+            st.success(f"Asignación completada. Barrios como '{barrio_actual}' se han mantenido agrupados.")
             st.dataframe(df_resultado.drop(columns=["_deuda_num"]), use_container_width=True)
             
             output = io.BytesIO()
             with pd.ExcelWriter(output, engine="openpyxl") as writer:
                 df_resultado.drop(columns=["_deuda_num"]).to_excel(writer, index=False)
-            st.sidebar.download_button("📥 Descargar Reporte", data=output.getvalue(), file_name="Ruta_Concentrada.xlsx")
+            st.sidebar.download_button("📥 Descargar Excel", data=output.getvalue(), file_name="Asignacion_UT.xlsx")
 
         with tab2:
             c1, c2 = st.columns(2)
             with c1:
-                st.subheader("🏆 Top 10 Técnicos (Deuda)")
-                resumen = df_resultado.groupby(col_tecnico)["_deuda_num"].sum().sort_values(ascending=False).head(10).reset_index()
-                resumen.columns = ["Técnico", "Deuda Total"]
-                resumen["Deuda Total"] = resumen["Deuda Total"].apply(lambda x: f"$ {x:,.0f}")
-                st.table(resumen)
+                st.subheader("🏆 Top 10 Técnicos (Deuda Total)")
+                ranking = df_resultado.groupby(col_tecnico)["_deuda_num"].sum().sort_values(ascending=False).head(10).reset_index()
+                ranking.columns = ["Técnico", "Deuda"]
+                ranking["Deuda"] = ranking["Deuda"].apply(lambda x: f"$ {x:,.0f}")
+                st.table(ranking)
             with c2:
-                st.subheader("📍 Barrios por Técnico")
-                # Gráfica para ver cuántos barrios tiene cada técnico (lo ideal es 1 o 2)
-                barrios_por_tec = df_resultado.groupby(col_tecnico)[col_barrio].nunique().reset_index()
-                fig = px.bar(barrios_por_tec, x=col_tecnico, y=col_barrio, labels={col_barrio: "Cant. Barrios"})
+                st.subheader("📊 Pólizas por Rango de Edad")
+                fig = px.bar(df_resultado["RANGO_EDAD"].value_counts().reset_index(), x="index", y="RANGO_EDAD")
                 st.plotly_chart(fig, use_container_width=True)
 
     except Exception as e:
