@@ -2,7 +2,6 @@ import streamlit as st
 import pandas as pd
 import io
 import plotly.express as px
-import math
 
 st.set_page_config(page_title="Dashboard Ejecutivo UT", layout="wide")
 
@@ -24,9 +23,6 @@ col_subcat = "SUBCATEGORIA"
 
 if archivo:
     try:
-        # =========================
-        # LECTURA
-        # =========================
         if archivo.name.lower().endswith(".xls"):
             df = pd.read_excel(archivo, engine="xlrd")
         else:
@@ -34,9 +30,7 @@ if archivo:
 
         df.columns = df.columns.str.strip()
 
-        # =========================
         # LIMPIAR DEUDA
-        # =========================
         df["_deuda_num"] = (
             df[col_deuda].astype(str)
             .str.replace("$", "", regex=False)
@@ -46,9 +40,7 @@ if archivo:
         )
         df["_deuda_num"] = pd.to_numeric(df["_deuda_num"], errors="coerce").fillna(0)
 
-        # =========================
-        # TABS (ORDEN CORRECTO)
-        # =========================
+        # TABS
         tab1, tab2, tab3 = st.tabs([
             "📋 Tabla",
             "🎯 Filtros",
@@ -66,26 +58,31 @@ if archivo:
             ciclos_sel = st.multiselect("Filtrar Ciclos", ciclos_disp, default=ciclos_disp)
 
             todos_tecnicos = sorted(df[col_tecnico].astype(str).unique())
-            tecnicos_sel = st.multiselect("Técnicos a Procesar", todos_tecnicos, default=todos_tecnicos)
 
-            # 🔥 SLIDER CORREGIDO
-            max_deuda = int(df["_deuda_num"].max())
-
-            # Redondear a millón más cercano
-            max_deuda_redondeado = int(math.ceil(max_deuda / 100000) * 100000)
-
-            deuda_min = st.slider(
-                "💰 Deuda mínima",
-                min_value=0,
-                max_value=max_deuda_redondeado,
-                value=0,
-                step=50000,
-                format="$ %d"
+            tecnicos_sel = st.multiselect(
+                "👥 Técnicos a procesar",
+                todos_tecnicos,
+                default=todos_tecnicos
             )
 
-            # Guardar filtros
+            # 🚫 NUEVO FILTRO
+            tecnicos_excluir = st.multiselect(
+                "🚫 Técnicos a excluir",
+                todos_tecnicos
+            )
+
+            deuda_min = st.number_input(
+                "💰 Deuda mínima",
+                min_value=0,
+                value=0,
+                step=50000,
+                format="%d"
+            )
+
+            # Guardar
             st.session_state["ciclos_sel"] = ciclos_sel
             st.session_state["tecnicos_sel"] = tecnicos_sel
+            st.session_state["tecnicos_excluir"] = tecnicos_excluir
             st.session_state["deuda_min"] = deuda_min
 
         # =========================
@@ -93,16 +90,22 @@ if archivo:
         # =========================
         ciclos_sel = st.session_state.get("ciclos_sel", df[col_ciclo].astype(str).unique())
         tecnicos_sel = st.session_state.get("tecnicos_sel", df[col_tecnico].astype(str).unique())
+        tecnicos_excluir = st.session_state.get("tecnicos_excluir", [])
         deuda_min = st.session_state.get("deuda_min", 0)
 
         # =========================
-        # FILTRADO
+        # FILTRADO BASE
         # =========================
         df_pool = df[
             (df[col_ciclo].astype(str).isin(ciclos_sel)) &
             (df[col_tecnico].isin(tecnicos_sel)) &
             (df["_deuda_num"] >= deuda_min)
         ].copy()
+
+        # 🚫 APLICAR EXCLUSIÓN
+        df_pool = df_pool[
+            ~df_pool[col_tecnico].isin(tecnicos_excluir)
+        ]
 
         # =========================
         # ASIGNACIÓN
@@ -130,7 +133,9 @@ if archivo:
         lista_final_otros = []
         indices_asignados = set()
 
-        for tec in [t for t in tecnicos_sel if t not in unidades_ph]:
+        tecnicos_finales = [t for t in tecnicos_sel if t not in unidades_ph and t not in tecnicos_excluir]
+
+        for tec in tecnicos_finales:
             cupo = 50
             acumulado_tec = []
 
@@ -163,6 +168,7 @@ if archivo:
         # TABLA
         # =========================
         with tab1:
+            st.success(f"Pólizas resultantes: {len(df_resultado)}")
             st.dataframe(df_resultado.drop(columns=["_deuda_num"]), use_container_width=True)
 
             output = io.BytesIO()
