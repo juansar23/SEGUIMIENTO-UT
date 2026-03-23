@@ -2,17 +2,14 @@ import streamlit as st
 import pandas as pd
 import io
 import plotly.express as px
+import re
 
-st.set_page_config(page_title="Dashboard Ejecutivo UT", layout="wide")
+st.set_page_config(page_title="UT Optimizado", layout="wide")
 
-st.title("📊 Dashboard Ejecutivo - Asignación por Bloque de Barrio")
+st.title("📊 Dashboard UT - Optimizado")
 
-archivo = st.file_uploader(
-    "Sube el archivo de Seguimiento",
-    type=["xls", "xlsx", "xlsm", "xlsb"]
-)
+archivo = st.file_uploader("Sube archivo", type=["xlsx"])
 
-# Columnas
 col_barrio = "BARRIO"
 col_ciclo = "CICLO_FACTURACION"
 col_direccion = "DIRECCION"
@@ -21,14 +18,36 @@ col_deuda = "DEUDA_TOTAL"
 col_edad = "RANGO_EDAD"
 col_subcat = "SUBCATEGORIA"
 
+def normalizar_direccion(dir):
+    try:
+        d = str(dir).upper()
+        d = d.replace("CARRERA", "CR").replace("CRA", "CR")
+        d = d.replace("CALLE", "CL")
+        nums = re.findall(r'\d+', d)
+        partes = d.split()
+
+        if len(partes) >= 2:
+            if len(nums) >= 2:
+                return f"{partes[0]} {partes[1]} #{nums[0]}-{nums[1]}"
+            return f"{partes[0]} {partes[1]}"
+        return d
+    except:
+        return str(dir)
+
 if archivo:
     try:
-        if archivo.name.lower().endswith(".xls"):
-            df = pd.read_excel(archivo, engine="xlrd")
-        else:
-            df = pd.read_excel(archivo, engine="openpyxl")
+        # 🔥 SOLO COLUMNAS NECESARIAS
+        columnas = [
+            col_barrio, col_ciclo, col_direccion,
+            col_tecnico, col_deuda, col_edad, col_subcat
+        ]
 
-        df.columns = df.columns.str.strip()
+        df = pd.read_excel(archivo, usecols=columnas)
+
+        # 🔥 TIPOS LIVIANOS
+        df[col_barrio] = df[col_barrio].astype("category")
+        df[col_ciclo] = df[col_ciclo].astype("category")
+        df[col_tecnico] = df[col_tecnico].astype("category")
 
         # LIMPIAR DEUDA
         df["_deuda_num"] = (
@@ -36,195 +55,102 @@ if archivo:
             .str.replace("$", "", regex=False)
             .str.replace(",", "", regex=False)
             .str.replace(".", "", regex=False)
-            .str.strip()
         )
         df["_deuda_num"] = pd.to_numeric(df["_deuda_num"], errors="coerce").fillna(0)
 
-        # TABS
-        tab1, tab2, tab3 = st.tabs([
-            "📋 Tabla",
-            "🎯 Filtros",
-            "📊 Dashboard"
-        ])
+        # NORMALIZAR DIRECCION
+        df["DIR_BASE"] = df[col_direccion].apply(normalizar_direccion)
 
         # =========================
-        # FILTROS
+        # FILTROS (LIVIANOS)
         # =========================
-        with tab2:
+        with st.expander("🎯 Filtros"):
 
-            st.subheader("🎯 Configuración de Filtros")
-
-            ciclos_disp = sorted(df[col_ciclo].astype(str).unique())
-            ciclos_sel = st.multiselect("Filtrar Ciclos", ciclos_disp, default=ciclos_disp)
-
-            todos_tecnicos = sorted(df[col_tecnico].astype(str).unique())
+            ciclos_sel = st.multiselect(
+                "Ciclo",
+                df[col_ciclo].unique(),
+                default=df[col_ciclo].unique()
+            )
 
             tecnicos_sel = st.multiselect(
-                "👥 Técnicos a procesar",
-                todos_tecnicos,
-                default=todos_tecnicos
+                "Técnicos",
+                df[col_tecnico].unique(),
+                default=df[col_tecnico].unique()
             )
 
-            # 🚫 NUEVO FILTRO
-            tecnicos_excluir = st.multiselect(
-                "🚫 Técnicos a excluir",
-                todos_tecnicos
-            )
+            excluir = st.multiselect("🚫 Excluir técnicos", df[col_tecnico].unique())
 
-            deuda_min = st.number_input(
-                "💰 Deuda mínima",
-                min_value=0,
-                value=0,
-                step=50000,
-                format="%d"
-            )
+            deuda_min = st.number_input("💰 Deuda mínima", 0, value=0)
 
-            # Guardar
-            st.session_state["ciclos_sel"] = ciclos_sel
-            st.session_state["tecnicos_sel"] = tecnicos_sel
-            st.session_state["tecnicos_excluir"] = tecnicos_excluir
-            st.session_state["deuda_min"] = deuda_min
-
-        # =========================
-        # RECUPERAR FILTROS
-        # =========================
-        ciclos_sel = st.session_state.get("ciclos_sel", df[col_ciclo].astype(str).unique())
-        tecnicos_sel = st.session_state.get("tecnicos_sel", df[col_tecnico].astype(str).unique())
-        tecnicos_excluir = st.session_state.get("tecnicos_excluir", [])
-        deuda_min = st.session_state.get("deuda_min", 0)
-
-        # =========================
-        # FILTRADO BASE
-        # =========================
-        df_pool = df[
-            (df[col_ciclo].astype(str).isin(ciclos_sel)) &
-            (df[col_tecnico].isin(tecnicos_sel)) &
+        # FILTRADO DIRECTO (SIN COPIAS GRANDES)
+        mask = (
+            df[col_ciclo].isin(ciclos_sel) &
+            df[col_tecnico].isin(tecnicos_sel) &
+            ~df[col_tecnico].isin(excluir) &
             (df["_deuda_num"] >= deuda_min)
-        ].copy()
-
-        # 🚫 APLICAR EXCLUSIÓN
-        df_pool = df_pool[
-            ~df_pool[col_tecnico].isin(tecnicos_excluir)
-        ]
-
-        # =========================
-        # ASIGNACIÓN
-        # =========================
-        unidades_ph = [
-            "ITA SUSPENSION BQ 15 PH",
-            "ITA SUSPENSION BQ 31 PH",
-            "ITA SUSPENSION BQ 32 PH",
-            "ITA SUSPENSION BQ 34 PH",
-            "ITA SUSPENSION BQ 35 PH",
-            "ITA SUS-PENSION BQ 36 PH",
-            "ITA SUSPENSION BQ 37 PH"
-        ]
-
-        df_ph_final = (
-            df_pool[df_pool[col_tecnico].isin(unidades_ph)]
-            .sort_values(by="_deuda_num", ascending=False)
-            .groupby(col_tecnico)
-            .head(50)
         )
 
-        df_otros = df_pool[~df_pool[col_tecnico].isin(unidades_ph)].copy()
-        df_otros = df_otros.sort_values(by=[col_ciclo, col_barrio, col_direccion])
+        df_filtrado = df.loc[mask]
 
-        lista_final_otros = []
-        indices_asignados = set()
+        # ORDEN
+        df_filtrado = df_filtrado.sort_values(
+            by=[col_ciclo, col_barrio, "DIR_BASE"]
+        )
 
-        tecnicos_finales = [t for t in tecnicos_sel if t not in unidades_ph and t not in tecnicos_excluir]
+        # =========================
+        # ASIGNACIÓN EFICIENTE
+        # =========================
+        asignados = []
+        usados = set()
 
-        for tec in tecnicos_finales:
+        tecnicos_final = [t for t in tecnicos_sel if t not in excluir]
+
+        for tec in tecnicos_final:
+
             cupo = 50
-            acumulado_tec = []
 
-            pols_disponibles = df_otros[~df_otros.index.isin(indices_asignados)]
+            disponibles = df_filtrado.loc[~df_filtrado.index.isin(usados)]
 
-            while cupo > 0 and not pols_disponibles.empty:
-                barrio_actual = pols_disponibles.iloc[0][col_barrio]
+            for _, grupo in disponibles.groupby([col_ciclo, col_barrio, "DIR_BASE"]):
 
-                bloque = pols_disponibles[
-                    pols_disponibles[col_barrio] == barrio_actual
-                ].head(cupo)
+                if cupo <= 0:
+                    break
 
-                acumulado_tec.append(bloque)
+                bloque = grupo.head(cupo)
 
-                indices_asignados.update(bloque.index)
+                temp = bloque.copy()
+                temp[col_tecnico] = tec
+
+                asignados.append(temp)
+
+                usados.update(bloque.index)
                 cupo -= len(bloque)
 
-                pols_disponibles = df_otros[
-                    ~df_otros.index.isin(indices_asignados)
-                ]
-
-            if acumulado_tec:
-                df_tec_res = pd.concat(acumulado_tec)
-                df_tec_res[col_tecnico] = tec
-                lista_final_otros.append(df_tec_res)
-
-        df_resultado = pd.concat([df_ph_final] + lista_final_otros, ignore_index=True)
+        df_final = pd.concat(asignados, ignore_index=True)
 
         # =========================
-        # TABLA
+        # RESULTADOS
         # =========================
-        with tab1:
-            st.success(f"Pólizas resultantes: {len(df_resultado)}")
-            st.dataframe(df_resultado.drop(columns=["_deuda_num"]), use_container_width=True)
+        st.success(f"Total asignado: {len(df_final)}")
 
-            output = io.BytesIO()
-            with pd.ExcelWriter(output, engine="openpyxl") as writer:
-                df_resultado.drop(columns=["_deuda_num"]).to_excel(writer, index=False)
+        st.dataframe(df_final, use_container_width=True)
 
-            st.download_button(
-                "📥 Descargar Excel",
-                data=output.getvalue(),
-                file_name="Asignacion_UT.xlsx"
-            )
-
-        # =========================
         # DASHBOARD
-        # =========================
-        with tab3:
+        col1, col2 = st.columns(2)
 
-            col1, col2 = st.columns(2)
+        with col1:
+            ranking = df_final.groupby(col_tecnico)["_deuda_num"].sum().reset_index()
+            st.dataframe(ranking)
 
-            with col1:
-                st.subheader("🏆 Top 10 Técnicos (Deuda)")
+        with col2:
+            fig = px.pie(df_final, names=col_subcat)
+            st.plotly_chart(fig, use_container_width=True)
 
-                ranking = (
-                    df_resultado.groupby(col_tecnico)["_deuda_num"]
-                    .sum()
-                    .sort_values(ascending=False)
-                    .head(10)
-                    .reset_index()
-                )
+        # DESCARGA
+        output = io.BytesIO()
+        df_final.to_excel(output, index=False)
 
-                ranking.columns = ["Técnico", "Deuda"]
-                ranking["Deuda"] = ranking["Deuda"].apply(lambda x: f"$ {x:,.0f}")
-
-                st.table(ranking)
-
-            with col2:
-                st.subheader("🥧 Subcategoría")
-
-                conteo_sub = df_resultado[col_subcat].value_counts().reset_index()
-                conteo_sub.columns = [col_subcat, "cantidad"]
-
-                fig_pie = px.pie(conteo_sub, names=col_subcat, values="cantidad", hole=0.4)
-                st.plotly_chart(fig_pie, use_container_width=True, key="pie_sub")
-
-            st.divider()
-
-            st.subheader("📊 Rango Edad")
-
-            conteo_edad = df_resultado[col_edad].value_counts().reset_index()
-            conteo_edad.columns = [col_edad, "cantidad"]
-
-            fig_bar = px.bar(conteo_edad, x=col_edad, y="cantidad", text_auto=True)
-            st.plotly_chart(fig_bar, use_container_width=True, key="bar_edad")
+        st.download_button("📥 Descargar", data=output.getvalue())
 
     except Exception as e:
-        st.error(f"❌ Error: {e}")
-
-else:
-    st.info("👆 Sube un archivo para comenzar")
+        st.error(f"Error: {e}")
