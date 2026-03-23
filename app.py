@@ -2,13 +2,12 @@ import streamlit as st
 import pandas as pd
 import io
 import plotly.express as px
+import math
 
-# Configuración
 st.set_page_config(page_title="Dashboard Ejecutivo UT", layout="wide")
 
 st.title("📊 Dashboard Ejecutivo - Asignación por Bloque de Barrio")
 
-# Carga archivo (arriba, no sidebar)
 archivo = st.file_uploader(
     "Sube el archivo de Seguimiento",
     type=["xls", "xlsx", "xlsm", "xlsb"]
@@ -48,18 +47,18 @@ if archivo:
         df["_deuda_num"] = pd.to_numeric(df["_deuda_num"], errors="coerce").fillna(0)
 
         # =========================
-        # TABS PRINCIPALES
+        # TABS (ORDEN CORRECTO)
         # =========================
         tab1, tab2, tab3 = st.tabs([
             "📋 Tabla",
-            "📊 Dashboard",
-            "🎯 Filtros"
+            "🎯 Filtros",
+            "📊 Dashboard"
         ])
 
         # =========================
-        # FILTROS EN TAB 3
+        # FILTROS
         # =========================
-        with tab3:
+        with tab2:
 
             st.subheader("🎯 Configuración de Filtros")
 
@@ -69,26 +68,36 @@ if archivo:
             todos_tecnicos = sorted(df[col_tecnico].astype(str).unique())
             tecnicos_sel = st.multiselect("Técnicos a Procesar", todos_tecnicos, default=todos_tecnicos)
 
+            # 🔥 SLIDER CORREGIDO
+            max_deuda = int(df["_deuda_num"].max())
+
+            # Redondear a millón más cercano
+            max_deuda_redondeado = int(math.ceil(max_deuda / 100000) * 100000)
+
             deuda_min = st.slider(
                 "💰 Deuda mínima",
                 min_value=0,
-                max_value=int(df["_deuda_num"].max()),
+                max_value=max_deuda_redondeado,
                 value=0,
-                step=50000
+                step=50000,
+                format="$ %d"
             )
 
-            # Guardar en sesión
+            # Guardar filtros
             st.session_state["ciclos_sel"] = ciclos_sel
             st.session_state["tecnicos_sel"] = tecnicos_sel
             st.session_state["deuda_min"] = deuda_min
 
         # =========================
-        # USAR FILTROS
+        # RECUPERAR FILTROS
         # =========================
         ciclos_sel = st.session_state.get("ciclos_sel", df[col_ciclo].astype(str).unique())
         tecnicos_sel = st.session_state.get("tecnicos_sel", df[col_tecnico].astype(str).unique())
         deuda_min = st.session_state.get("deuda_min", 0)
 
+        # =========================
+        # FILTRADO
+        # =========================
         df_pool = df[
             (df[col_ciclo].astype(str).isin(ciclos_sel)) &
             (df[col_tecnico].isin(tecnicos_sel)) &
@@ -169,7 +178,7 @@ if archivo:
         # =========================
         # DASHBOARD
         # =========================
-        with tab2:
+        with tab3:
 
             col1, col2 = st.columns(2)
 
