@@ -5,12 +5,9 @@ import plotly.express as px
 
 # Configuración
 st.set_page_config(page_title="Dashboard Ejecutivo UT", layout="wide")
-st.title("📊 Dashboard Ejecutivo - Asignación con Prioridad de Edad")
+st.title("📊 Dashboard Ejecutivo - Asignación con Restricción PH")
 
-# Cargar archivo
-archivo = st.file_uploader("Sube el archivo de Seguimiento", type=["xls", "xlsx", "xlsm", "xlsb"])
-
-# Columnas
+# Colores y Configuración de Columnas
 col_barrio = "BARRIO"
 col_ciclo = "CICLO_FACTURACION"
 col_direccion = "DIRECCION"
@@ -19,11 +16,18 @@ col_deuda = "DEUDA_TOTAL"
 col_edad = "RANGO_EDAD"
 col_subcat = "SUBCATEGORIA"
 
+# Lista Maestra PH
+unidades_ph = [
+    "ITA SUSPENSION BQ 15 PH", "ITA SUSPENSION BQ 31 PH", "ITA SUSPENSION BQ 32 PH",
+    "ITA SUSPENSION BQ 34 PH", "ITA SUSPENSION BQ 35 PH", "ITA SUS-PENSION BQ 36 PH",
+    "ITA SUSPENSION BQ 37 PH"
+]
+
+archivo = st.file_uploader("Sube el archivo de Seguimiento", type=["xls", "xlsx", "xlsm", "xlsb"])
+
 if archivo:
     try:
-        # =========================
-        # 1. LECTURA
-        # =========================
+        # 1. LECTURA Y LIMPIEZA
         if archivo.name.lower().endswith(".xls"):
             df = pd.read_excel(archivo, engine="xlrd")
         else:
@@ -31,7 +35,7 @@ if archivo:
 
         df.columns = df.columns.str.strip()
 
-        # Limpieza de deuda para cálculos
+        # Limpieza de deuda
         df["_deuda_num"] = (
             df[col_deuda].astype(str)
             .str.replace("$", "", regex=False)
@@ -41,83 +45,75 @@ if archivo:
         )
         df["_deuda_num"] = pd.to_numeric(df["_deuda_num"], errors="coerce").fillna(0)
 
-        # =========================
         # TABS
-        # =========================
-        tab_filtros, tab1, tab2 = st.tabs(["⚙️ Configuración y Filtros", "📋 Tabla y Descarga", "📊 Dashboard"])
+        tab_filtros, tab1, tab2 = st.tabs(["⚙️ Configuración", "📋 Tabla Final", "📊 Dashboard"])
 
-        # =========================
-        # FILTROS Y PRIORIDAD
-        # =========================
         with tab_filtros:
-            st.subheader("⚙️ Parámetros de Selección")
-            
+            st.subheader("⚙️ Filtros y Prioridades")
             c1, c2 = st.columns(2)
+            
             with c1:
                 ciclos_disp = sorted(df[col_ciclo].dropna().astype(str).unique())
-                ciclos_sel = st.multiselect("1. Filtrar Ciclos", ciclos_disp, default=ciclos_disp)
+                ciclos_sel = st.multiselect("Filtrar Ciclos", ciclos_disp, default=ciclos_disp)
                 
                 todos_tecnicos = sorted(df[col_tecnico].dropna().astype(str).str.strip().unique())
-                tecnicos_sel = st.multiselect("2. Técnicos a Procesar", todos_tecnicos, default=todos_tecnicos)
+                tecnicos_sel = st.multiselect("Técnicos a incluir en el reparto", todos_tecnicos, default=todos_tecnicos)
 
             with c2:
                 edades_disp = sorted(df[col_edad].dropna().astype(str).unique())
-                edades_sel = st.multiselect("3. Filtrar Rangos de Edad", edades_disp, default=edades_disp)
+                edades_sel = st.multiselect("Filtrar Rangos de Edad", edades_disp, default=edades_disp)
                 
-                # --- Lógica de Prioridad ---
-                st.write("**4. Definir Prioridad de Edad (Arrastra para reordenar)**")
                 prioridad_edades = st.multiselect(
-                    "Orden de importancia (el primero tiene prioridad):", 
+                    "Prioridad de asignación (Orden de Edad):", 
                     edades_sel, 
-                    default=edades_sel,
-                    help="Las pólizas se asignarán primero a los rangos que pongas arriba en esta lista."
+                    default=edades_sel
                 )
 
         # =========================
-        # PROCESAMIENTO Y ORDENAMIENTO
+        # PROCESAMIENTO
         # =========================
-        # Filtrado Base
+        # Aplicar filtros básicos
         df_pool = df[
             (df[col_ciclo].astype(str).isin(ciclos_sel)) &
             (df[col_edad].astype(str).isin(edades_sel))
         ].copy()
 
-        # Aplicar Prioridad Dinámica
-        # Convertimos la columna de edad en una categoría con el orden elegido por el usuario
+        # Establecer orden categórico por edad
         df_pool[col_edad] = pd.Categorical(df_pool[col_edad], categories=prioridad_edades, ordered=True)
+
+        # --- REGLA PH: Solo se asignan a sí mismos ---
+        # Filtramos las pólizas que YA pertenecen a un PH
+        df_solo_ph = df_pool[df_pool[col_tecnico].isin(unidades_ph)].copy()
         
-        # Ordenamos: 1. Por el orden de edad elegido, 2. Por Deuda (mayor a menor)
-        df_pool = df_pool.sort_values(by=[col_edad, "_deuda_num"], ascending=[True, False])
-
-        # =========================
-        # LÓGICA DE ASIGNACIÓN
-        # =========================
-        unidades_ph = [
-            "ITA SUSPENSION BQ 15 PH", "ITA SUSPENSION BQ 31 PH", "ITA SUSPENSION BQ 32 PH",
-            "ITA SUSPENSION BQ 34 PH", "ITA SUSPENSION BQ 35 PH", "ITA SUS-PENSION BQ 36 PH",
-            "ITA SUSPENSION BQ 37 PH"
-        ]
-
-        # 1. Asignación PH (Mantienen su lógica de top 50 por deuda dentro de su grupo)
+        # Cada técnico PH se queda con sus mejores 50 (por deuda)
         df_ph_final = (
-            df_pool[df_pool[col_tecnico].isin(unidades_ph)]
+            df_solo_ph.sort_values(by="_deuda_num", ascending=False)
             .groupby(col_tecnico)
             .head(50)
         )
 
-        # 2. Asignación General (Técnicos NO PH)
-        indices_ph = set(df_ph_final.index)
-        df_para_repartir = df_pool.drop(index=indices_ph, errors='ignore').copy()
+        # --- REPARTO GENERAL ---
+        # El resto de pólizas (incluyendo las de PH que sobraron o las sin técnico)
+        indices_ph_asignados = set(df_ph_final.index)
         
-        # Importante: Re-ordenamos para asegurar que el reparto respete la prioridad de edad
-        df_para_repartir = df_para_repartir.sort_values(by=[col_edad, col_barrio, "_deuda_num"], ascending=[True, True, False])
+        # IMPORTANTE: Excluimos TODAS las pólizas que venían marcadas como PH originalmente 
+        # para que no se le entreguen a técnicos integrales comunes.
+        indices_todas_ph_originales = set(df_solo_ph.index)
+        
+        df_para_reparto = df_pool.drop(index=indices_todas_ph_originales, errors='ignore').copy()
+        
+        # Ordenar pool general por prioridad de edad y barrio
+        df_para_reparto = df_para_reparto.sort_values(
+            by=[col_edad, col_barrio, "_deuda_num"], 
+            ascending=[True, True, False]
+        )
 
         lista_final_otros = []
         puntero = 0
         tecnicos_no_ph = [t for t in tecnicos_sel if t not in unidades_ph]
 
         for tec in tecnicos_no_ph:
-            bloque = df_para_repartir.iloc[puntero : puntero + 50].copy()
+            bloque = df_para_reparto.iloc[puntero : puntero + 50].copy()
             if not bloque.empty:
                 bloque[col_tecnico] = tec
                 lista_final_otros.append(bloque)
@@ -125,39 +121,23 @@ if archivo:
             else:
                 break
 
-        df_resultado = pd.concat([df_ph_final] + lista_final_otros, ignore_index=True) if lista_final_otros or not df_ph_final.empty else pd.DataFrame()
+        # UNIÓN FINAL
+        df_resultado = pd.concat([df_ph_final] + lista_final_otros, ignore_index=True)
 
-        # =========================
-        # VISTAS (TABLA Y DASHBOARD)
-        # =========================
-        if not df_resultado.empty:
-            with tab_filtros:
-                st.divider()
-                st.success(f"✅ Se han asignado {len(df_resultado)} pólizas prioritarias.")
+        # MOSTRAR RESULTADOS
+        with tab1:
+            st.info(f"Se asignaron {len(df_ph_final)} pólizas a técnicos PH (propias) y {len(df_resultado) - len(df_ph_final)} al resto.")
+            st.dataframe(df_resultado.drop(columns=["_deuda_num"]), use_container_width=True)
+            
+            output = io.BytesIO()
+            with pd.ExcelWriter(output, engine="openpyxl") as writer:
+                df_resultado.drop(columns=["_deuda_num"]).to_excel(writer, index=False)
+            st.download_button("📥 Descargar Excel", data=output.getvalue(), file_name="Asignacion_UT.xlsx")
 
-            with tab1:
-                st.dataframe(df_resultado.drop(columns=["_deuda_num"]), use_container_width=True)
-                output = io.BytesIO()
-                with pd.ExcelWriter(output, engine="openpyxl") as writer:
-                    df_resultado.drop(columns=["_deuda_num"]).to_excel(writer, index=False)
-                st.download_button("📥 Descargar Excel de Asignación", data=output.getvalue(), file_name="Asignacion_Priorizada.xlsx")
-
-            with tab2:
-                c1, c2 = st.columns(2)
-                with c1:
-                    st.subheader("🏆 Deuda Asignada por Técnico")
-                    ranking = df_resultado.groupby(col_tecnico)["_deuda_num"].sum().sort_values(ascending=False).head(10).reset_index()
-                    ranking.columns = ["Técnico", "Deuda Total"]
-                    st.table(ranking.style.format({"Deuda Total": "$ {:,.0f}"}))
-                with c2:
-                    st.subheader("📊 Cumplimiento de Prioridad (Edades)")
-                    conteo_edad = df_resultado[col_edad].value_counts().reindex(prioridad_edades).reset_index()
-                    fig_bar = px.bar(conteo_edad, x=col_edad, y="count", color=col_edad, title="Pólizas asignadas según tu prioridad")
-                    st.plotly_chart(fig_bar, use_container_width=True)
-        else:
-            st.warning("No hay datos que coincidan con los filtros seleccionados.")
+        with tab2:
+            st.subheader("Distribución de Pólizas por Rango de Edad")
+            fig = px.bar(df_resultado[col_edad].value_counts().reset_index(), x=col_edad, y="count", color=col_edad)
+            st.plotly_chart(fig, use_container_width=True)
 
     except Exception as e:
-        st.error(f"Error en el proceso: {e}")
-else:
-    st.info("👋 Sube un archivo Excel para comenzar.")
+        st.error(f"Error: {e}")
