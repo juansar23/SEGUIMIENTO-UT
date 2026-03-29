@@ -57,7 +57,7 @@ if archivo:
             ciclos_disp = sorted(df[col_ciclo].dropna().astype(str).unique())
             ciclos_sel = st.multiselect("Filtrar Ciclos", ciclos_disp, default=ciclos_disp)
 
-            # 🔥 FIX: quitar nan
+            # Extraer técnicos únicos (quitando nulos)
             todos_tecnicos = sorted(df[col_tecnico].dropna().astype(str).str.strip().unique())
             tecnicos_sel = st.multiselect("Técnicos a Procesar", todos_tecnicos, default=todos_tecnicos)
 
@@ -73,18 +73,7 @@ if archivo:
         ].copy()
 
         # =========================
-        # SEPARAR SIN TÉCNICO (ANTES DE STRING)
-        # =========================
-        df_sin_tecnico = df_pool[
-            df_pool[col_tecnico].isna() |
-            (df_pool[col_tecnico].astype(str).str.strip() == "")
-        ].copy()
-
-        df_con_tecnico = df_pool.drop(df_sin_tecnico.index).copy()
-        df_con_tecnico[col_tecnico] = df_con_tecnico[col_tecnico].astype(str).str.strip()
-
-        # =========================
-        # LÓGICA DE ASIGNACIÓN
+        # LÓGICA DE ASIGNACIÓN MEJORADA
         # =========================
         unidades_ph = [
             "ITA SUSPENSION BQ 15 PH", "ITA SUSPENSION BQ 31 PH", "ITA SUSPENSION BQ 32 PH",
@@ -92,64 +81,76 @@ if archivo:
             "ITA SUSPENSION BQ 37 PH"
         ]
 
-        # PH
+        # 1. Procesar PH (Se llevan sus mejores 50 por deuda)
         df_ph_final = (
-            df_con_tecnico[df_con_tecnico[col_tecnico].isin(unidades_ph)]
+            df_pool[df_pool[col_tecnico].isin(unidades_ph)]
             .sort_values(by="_deuda_num", ascending=False)
             .groupby(col_tecnico)
             .head(50)
         )
 
-        # OTROS + SIN TÉCNICO
-        df_otros = pd.concat([
-            df_con_tecnico[~df_con_tecnico[col_tecnico].isin(unidades_ph)],
-            df_sin_tecnico
-        ]).copy()
-
-        df_otros = df_otros.sort_values(by=[col_ciclo, col_barrio, col_direccion])
+        # 2. Pool para técnicos NO PH (incluye los que no tenían técnico asignado)
+        indices_ocupados_ph = set(df_ph_final.index)
+        
+        # Filtramos lo que queda disponible (excluyendo lo que ya tomó PH)
+        df_disponible_otros = df_pool.drop(index=indices_ocupados_ph, errors='ignore').copy()
+        
+        # Ordenamos geográficamente para que los bloques de 50 sean coherentes por barrio
+        df_disponible_otros = df_disponible_otros.sort_values(by=[col_ciclo, col_barrio, col_direccion])
 
         lista_final_otros = []
-        indices_asignados = set()
-
+        puntero = 0 # Para ir segmentando el dataframe de 50 en 50
+        
         tecnicos_no_ph = [t for t in tecnicos_sel if t not in unidades_ph]
 
         for tec in tecnicos_no_ph:
-            cupo = 50
-            acumulado_tec = []
+            # Extraemos un bloque de 50 filas partiendo de la posición actual del puntero
+            bloque = df_disponible_otros.iloc[puntero : puntero + 50].copy()
+            
+            if not bloque.empty:
+                bloque[col_tecnico] = tec
+                lista_final_otros.append(bloque)
+                puntero += 50
+            else:
+                # Si no hay más filas, dejamos de asignar
+                break
 
-            pols_disponibles = df_otros[~df_otros.index.isin(indices_asignados)]
-
-            while cupo > 0 and not pols_disponibles.empty:
-                barrio_actual = pols_disponibles.iloc[0][col_barrio]
-
-                bloque_barrio = pols_disponibles[
-                    pols_disponibles[col_barrio] == barrio_actual
-                ].head(cupo)
-
-                acumulado_tec.append(bloque_barrio)
-                indices_asignados.update(bloque_barrio.index)
-
-                cupo -= len(bloque_barrio)
-                pols_disponibles = df_otros[~df_otros.index.isin(indices_asignados)]
-
-            if acumulado_tec:
-                df_tec_res = pd.concat(acumulado_tec)
-                df_tec_res[col_tecnico] = tec
-                lista_final_otros.append(df_tec_res)
-
-        df_resultado = pd.concat([df_ph_final] + lista_final_otros, ignore_index=True)
+        # Combinar resultados finales
+        if lista_final_otros:
+            df_resultado = pd.concat([df_ph_final] + lista_final_otros, ignore_index=True)
+        else:
+            df_resultado = df_ph_final
 
         # =========================
-        # TABLA
+        # MÉTRICAS EN TAB FILTROS
+        # =========================
+        with tab_filtros:
+            st.divider()
+            st.info(f"💡 **Estado de la Asignación:**\n"
+                    f"- Pólizas totales tras filtros: **{len(df_pool)}**\n"
+                    f"- Pólizas asignadas con éxito: **{len(df_resultado)}**\n"
+                    f"- Técnicos que recibieron trabajo: **{df_resultado[col_tecnico].nunique()}** de **{len(tecnicos_sel)}**")
+            
+            if len(df_resultado) < (len(tecnicos_sel) * 50) and len(df_disponible_otros) < (len(tecnicos_no_ph) * 50):
+                st.warning("⚠️ Se agotaron las pólizas disponibles antes de completar el cupo de todos los técnicos.")
+
+        # =========================
+        # TABLA Y DESCARGA
         # =========================
         with tab1:
+            st.subheader("📋 Vista Previa de la Asignación")
             st.dataframe(df_resultado.drop(columns=["_deuda_num"]), use_container_width=True)
 
             output = io.BytesIO()
             with pd.ExcelWriter(output, engine="openpyxl") as writer:
                 df_resultado.drop(columns=["_deuda_num"]).to_excel(writer, index=False)
 
-            st.download_button("📥 Descargar Excel", data=output.getvalue(), file_name="Asignacion_UT.xlsx")
+            st.download_button(
+                label="📥 Descargar Excel de Asignación",
+                data=output.getvalue(),
+                file_name="Asignacion_UT_Final.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            )
 
         # =========================
         # DASHBOARD
@@ -158,7 +159,7 @@ if archivo:
             c1, c2 = st.columns(2)
 
             with c1:
-                st.subheader("🏆 Top 10 Técnicos (Deuda)")
+                st.subheader("🏆 Top 10 Técnicos (Deuda Asignada)")
                 ranking = (
                     df_resultado.groupby(col_tecnico)["_deuda_num"]
                     .sum()
@@ -174,7 +175,6 @@ if archivo:
                 st.subheader("🥧 Distribución por Subcategoría")
                 conteo_sub = df_resultado[col_subcat].value_counts().reset_index()
                 conteo_sub.columns = [col_subcat, "cantidad"]
-
                 fig_pie = px.pie(conteo_sub, names=col_subcat, values="cantidad", hole=0.4)
                 st.plotly_chart(fig_pie, use_container_width=True)
 
@@ -183,9 +183,11 @@ if archivo:
             st.subheader("📊 Pólizas por Rango de Edad")
             conteo_edad = df_resultado[col_edad].value_counts().reset_index()
             conteo_edad.columns = [col_edad, "cantidad"]
-
             fig_bar = px.bar(conteo_edad, x=col_edad, y="cantidad", color=col_edad, text_auto=True)
             st.plotly_chart(fig_bar, use_container_width=True)
 
     except Exception as e:
-        st.error(f"Error detectado: {e}")
+        st.error(f"Se produjo un error al procesar el archivo: {e}")
+
+else:
+    st.info("Por favor, sube un archivo Excel para comenzar el proceso de asignación.")
