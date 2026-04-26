@@ -2,11 +2,10 @@ import streamlit as st
 import pandas as pd
 import io
 
-# Configuración
-st.set_page_config(page_title="Dashboard Ejecutivo UT", layout="wide")
-st.title("📊 Dashboard Ejecutivo - Asignación con Intercambio")
+st.set_page_config(page_title="Sistema ITA - Reparto Geográfico", layout="wide")
+st.title("📊 Asignación Geográfica por Bloques")
 
-# Mapeo de Unidades PH
+# Mapeo PH (Blindados)
 mapeo_ph = {
     "ITA SUSPENSION BQ 15 PH": "HENRY CHAPMAN RUIZ",
     "ITA SUSPENSION BQ 31 PH": "SORELI FIGUEROA ALMARALES",
@@ -17,116 +16,90 @@ mapeo_ph = {
     "ITA SUSPENSION BQ 37 PH": "TATIANA ISABEL CASTRO GUZMAN"
 }
 
-# Nombres de columnas esperados en MAYÚSCULAS
+# Columnas (con normalización robusta)
 COL_BARRIO, COL_CICLO = "BARRIO", "CICLO_FACTURACION"
 COL_TECNICO, COL_UNIDAD = "TECNICOS_INTEGRALES", "UNIDAD_TRABAJO"
-COL_DEUDA, COL_EDAD = "DEUDA_TOTAL", "RANGO_EDAD"
-COL_SUBCAT = "SUBCATEGORIA"
+COL_DIRECCION, COL_EDAD = "DIRECCION", "RANGO_EDAD"
 
 @st.cache_data(ttl=3600)
-def cargar_base_segura(file):
-    try:
-        df_raw = pd.read_excel(file)
-    except:
-        df_raw = pd.read_excel(file, engine="openpyxl")
-    
-    # Limpieza de columnas para evitar el KeyError
-    df_raw.columns = [str(c).strip().upper() for c in df_raw.columns]
-    
-    # Crear columna auxiliar de origen asegurando que sea string
-    if COL_TECNICO in df_raw.columns:
-        df_raw["TEC_ORI"] = df_raw[COL_TECNICO].astype(str).str.strip()
-    
-    return df_raw
+def cargar_datos(file):
+    df = pd.read_excel(file)
+    df.columns = [str(c).strip().upper() for c in df.columns]
+    # Guardamos técnico original para el filtro de "no repetir"
+    df["TEC_ORI"] = df[COL_TECNICO].astype(str).str.strip()
+    return df
 
-archivo = st.file_uploader("Sube el archivo de Seguimiento", type=["xlsx", "xlsb"])
+archivo = st.file_uploader("Subir Archivo", type=["xlsx"])
 
 if archivo:
-    df = cargar_base_segura(archivo)
+    df = cargar_datos(archivo)
     
-    if COL_TECNICO not in df.columns:
-        st.error(f"No se encontró la columna '{COL_TECNICO}'. Verifica tu Excel.")
-        st.stop()
-
-    tab_filtros, tab_resultado, tab_dashboard = st.tabs(["⚙️ Configuración", "📋 Tabla Final", "📊 Dashboard"])
-
-    with tab_filtros:
-        # Checkbox de exclusión PH
-        excluir_ph = st.checkbox("🚫 EXCLUIR UNIDADES PH", value=False)
-        
-        c1, c2, c3 = st.columns(3)
+    tab1, tab2 = st.tabs(["⚙️ Configuración", "📋 Resultado"])
+    
+    with tab1:
+        c1, c2 = st.columns(2)
         with c1:
-            ciclos_disp = sorted(df[COL_CICLO].dropna().unique().astype(str))
-            ciclos_sel = st.multiselect("Ciclos", ciclos_disp, default=ciclos_disp)
-            
-            subcat_disp = sorted(df[COL_SUBCAT].dropna().unique().astype(str))
-            subcat_sel = st.multiselect("Subcategoría", subcat_disp, default=subcat_disp)
-
+            excluir_ph = st.checkbox("🚫 EXCLUIR PH (No reasignar)", value=True)
+            contingencia = st.radio("Si faltan pólizas para todos:", ["Detener asignación", "Ignorar restricción de no repetir barrio"], help="Si se acaban las pólizas de otros barrios, ¿quieres que los técnicos tomen las suyas?")
         with c2:
-            edades_disp = sorted(df[COL_EDAD].dropna().unique().astype(str))
-            prioridad_edades = st.multiselect("Prioridad de Edad:", edades_disp, default=edades_disp)
-
-        with c3:
-            nombres_ph = list(mapeo_ph.values())
-            # CORRECCIÓN DEL ERROR DE ORDENAMIENTO (sorted)
-            # Convertimos a string cada elemento antes de comparar para evitar el TypeError
-            tecs_unicos = [str(t) for t in df["TEC_ORI"].unique() if str(t).lower() != "nan"]
-            tecs_reparto = sorted([t for t in tecs_unicos if t not in nombres_ph])
-            
-            tecnicos_sel = st.multiselect("Técnicos Reparto", tecs_reparto, default=tecs_reparto)
+            tecs_disponibles = sorted([str(t) for t in df["TEC_ORI"].unique() if str(t).lower() != "nan" and t not in mapeo_ph.values()])
+            tecnicos_sel = st.multiselect("Técnicos de Reparto", tecs_disponibles, default=tecs_disponibles)
         
-        procesar = st.button("🚀 Procesar Asignación")
+        procesar = st.button("🚀 Iniciar Reparto Geográfico")
 
     if procesar:
-        # Filtrado inicial
-        mask = (
-            df[COL_CICLO].astype(str).isin(ciclos_sel) & 
-            df[COL_EDAD].astype(str).isin(prioridad_edades) &
-            df[COL_SUBCAT].astype(str).isin(subcat_sel)
-        )
-        df_f = df[mask].copy()
+        # 1. ORDENAMIENTO JERÁRQUICO (Ciclo -> Barrio -> Dirección)
+        df_work = df.sort_values([COL_CICLO, COL_BARRIO, COL_DIRECCION]).copy()
         
-        # 1. Manejo de PH (Blindados)
-        df_ph_final = pd.DataFrame()
+        # 2. Separar PH
+        df_ph = pd.DataFrame()
         indices_ph = set()
         if not excluir_ph:
-            list_ph = []
+            df_ph = df_work[df_work[COL_UNIDAD].isin(mapeo_ph.keys())].copy()
             for und, tec in mapeo_ph.items():
-                p_ph = df_f[df_f[COL_UNIDAD] == und].head(50)
-                if not p_ph.empty:
-                    p_ph[COL_TECNICO] = tec
-                    list_ph.append(p_ph)
-                    indices_ph.update(p_ph.index)
-            if list_ph:
-                df_ph_final = pd.concat(list_ph)
-        
-        # 2. Reparto General con Intercambio
-        df_gen = df_f[~df_f[COL_UNIDAD].isin(mapeo_ph.keys()) & ~df_f.index.isin(indices_ph)].copy()
-        df_gen = df_gen.sort_values([COL_EDAD, COL_BARRIO], ascending=[False, True])
-        
-        final_reparto = []
+                df_ph.loc[df_ph[COL_UNIDAD] == und, COL_TECNICO] = tec
+            indices_ph = set(df_ph.index)
+
+        # 3. Preparar Reparto General
+        df_gen = df_work[~df_work.index.isin(indices_ph)].copy()
         asignados = set()
-        
+        lista_resultados = []
+
+        # Lógica de Consumo por Bloques
         for tec in tecnicos_sel:
-            # Buscamos 50 pólizas donde el dueño original NO sea el técnico actual
-            pool = df_gen[(df_gen["TEC_ORI"] != tec) & (~df_gen.index.isin(asignados))].head(50)
-            if not pool.empty:
-                pool[COL_TECNICO] = tec
-                final_reparto.append(pool)
-                asignados.update(pool.index)
-        
-        # Combinar resultados
-        if not df_ph_final.empty or final_reparto:
-            df_resultado = pd.concat([df_ph_final] + final_reparto, ignore_index=True)
-            
-            with tab_resultado:
-                st.success(f"Asignación lista: {len(df_resultado)} registros.")
-                # Quitamos la columna auxiliar antes de mostrar y descargar
-                df_mostrar = df_resultado.drop(columns=["TEC_ORI"])
-                st.dataframe(df_mostrar, use_container_width=True)
+            cupo = 50
+            while cupo > 0:
+                # Filtrar disponibles
+                candidatos = df_gen[~df_gen.index.isin(asignados)]
                 
-                output = io.BytesIO()
-                df_mostrar.to_excel(output, index=False, engine="openpyxl")
-                st.download_button("📥 Descargar Excel", output.getvalue(), "Asignacion_Final.xlsx")
-        else:
-            st.warning("No hay datos que coincidan con los filtros seleccionados.")
+                if candidatos.empty: break # No hay más trabajo
+                
+                # Política: ¿Ignorar restricción?
+                if contingencia == "Detener asignación":
+                    candidatos = candidatos[candidatos["TEC_ORI"] != tec]
+                
+                if candidatos.empty: break # Nadie más puede tomar esto
+                
+                # Identificar el barrio actual del primer candidato
+                barrio_actual = candidatos.iloc[0][COL_BARRIO]
+                bloque_barrio = candidatos[candidatos[COL_BARRIO] == barrio_actual]
+                
+                # ¿Cuánto tomamos?
+                cantidad_a_tomar = min(len(bloque_barrio), cupo)
+                seleccion = bloque_barrio.head(cantidad_a_tomar).copy()
+                
+                # Asignar
+                seleccion[COL_TECNICO] = tec
+                lista_resultados.append(seleccion)
+                asignados.update(seleccion.index)
+                cupo -= len(seleccion)
+
+        with tab2:
+            df_final = pd.concat([df_ph] + lista_resultados, ignore_index=True)
+            st.success(f"Asignación completa: {len(df_final)} registros.")
+            st.dataframe(df_final.drop(columns=["TEC_ORI"]))
+            
+            # Descarga
+            towrite = io.BytesIO()
+            df_final.drop(columns=["TEC_ORI"]).to_excel(towrite, index=False)
+            st.download_button("📥 Descargar", towrite.getvalue(), "Asignacion_Geografica.xlsx")
