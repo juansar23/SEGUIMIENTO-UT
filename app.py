@@ -2,11 +2,11 @@ import streamlit as st
 import pandas as pd
 import io
 
-# Configuración de página
-st.set_page_config(page_title="Sistema ITA - Reparto Seguro", layout="wide")
-st.title("📊 Asignación con Intercambio Obligatorio")
+# Configuración
+st.set_page_config(page_title="Dashboard Ejecutivo UT", layout="wide")
+st.title("📊 Dashboard Ejecutivo - Asignación con Intercambio")
 
-# Unidades PH que NO deben intercambiar
+# Mapeo de Unidades PH
 mapeo_ph = {
     "ITA SUSPENSION BQ 15 PH": "HENRY CHAPMAN RUIZ",
     "ITA SUSPENSION BQ 31 PH": "SORELI FIGUEROA ALMARALES",
@@ -17,88 +17,91 @@ mapeo_ph = {
     "ITA SUSPENSION BQ 37 PH": "TATIANA ISABEL CASTRO GUZMAN"
 }
 
-# Nombres de columnas esperados (se limpiarán automáticamente)
-COL_BARRIO = "BARRIO"
-COL_CICLO = "CICLO_FACTURACION"
-COL_TECNICO = "TECNICOS_INTEGRALES"
-COL_UNIDAD = "UNIDAD_TRABAJO"
-COL_DEUDA = "DEUDA_TOTAL"
-COL_EDAD = "RANGO_EDAD"
+# Nombres de columnas esperados
+COL_BARRIO, COL_CICLO = "BARRIO", "CICLO_FACTURACION"
+COL_TECNICO, COL_UNIDAD = "TECNICOS_INTEGRALES", "UNIDAD_TRABAJO"
+COL_DEUDA, COL_EDAD = "DEUDA_TOTAL", "RANGO_EDAD"
 
 @st.cache_data(ttl=3600)
-def procesar_base_ligera(file):
+def cargar_base_segura(file):
     try:
-        # Intentar cargar con motor rápido si está disponible
         df_raw = pd.read_excel(file)
-    except Exception:
+    except:
         df_raw = pd.read_excel(file, engine="openpyxl")
     
-    # --- BLOQUE ANTIV-ERROR: LIMPIEZA DE COLUMNAS ---
-    # Elimina espacios en blanco y convierte a MAYÚSCULAS para evitar el KeyError
+    # Limpieza agresiva de columnas para evitar KeyError
     df_raw.columns = [str(c).strip().upper() for c in df_raw.columns]
     
-    # Validar que la columna crítica existe tras la limpieza
-    if COL_TECNICO not in df_raw.columns:
-        st.error(f"❌ Error: No se encontró la columna '{COL_TECNICO}'. Columnas actuales: {list(df_raw.columns)}")
-        st.stop()
-
-    # Guardamos técnico original para validar intercambio
-    df_raw["TEC_ORI"] = df_raw[COL_TECNICO].astype(str).str.strip()
-    df_raw[COL_EDAD] = df_raw[COL_EDAD].astype(str).str.strip()
-    
-    # Limpieza de valores numéricos para la deuda
-    df_raw["_VAL"] = pd.to_numeric(
-        df_raw[COL_DEUDA].astype(str).str.replace(r"[^\d]", "", regex=True), 
-        errors="coerce"
-    ).fillna(0)
+    # Crear columna auxiliar de origen
+    if COL_TECNICO in df_raw.columns:
+        df_raw["TEC_ORI"] = df_raw[COL_TECNICO].astype(str).str.strip()
     
     return df_raw
 
-archivo = st.file_uploader("Subir Seguimiento", type=["xlsx", "xlsb"])
+archivo = st.file_uploader("Sube el archivo de Seguimiento", type=["xlsx", "xlsb"])
 
 if archivo:
-    df = procesar_base_ligera(archivo)
+    df = cargar_base_segura(archivo)
     
-    with st.sidebar:
-        st.header("Filtros")
-        ciclos = st.multiselect("Ciclos", df[COL_CICLO].unique(), default=df[COL_CICLO].unique())
-        edades = st.multiselect("Edades", df[COL_EDAD].unique(), default=df[COL_EDAD].unique())
-        nombres_ph = list(mapeo_ph.values())
-        tecs_reparto = sorted([t for t in df["TEC_ORI"].unique() if t not in nombres_ph and t != "nan"])
-        tecs_sel = st.multiselect("Técnicos a Intercambiar", tecs_reparto, default=tecs_reparto)
+    # Verificación de seguridad
+    if COL_TECNICO not in df.columns:
+        st.error(f"No se encontró la columna '{COL_TECNICO}'. Verifica tu Excel.")
+        st.stop()
 
-    if st.button("🚀 Iniciar Reparto"):
-        # Filtrado por selecciones del usuario
-        df_f = df[(df[COL_CICLO].isin(ciclos)) & (df[COL_EDAD].isin(edades))].copy()
+    tab_filtros, tab_resultado = st.tabs(["⚙️ Configuración", "📋 Tabla Final"])
+
+    with tab_filtros:
+        # BOTÓN SOLICITADO: EXCLUIR PH
+        excluir_ph = st.checkbox("🚫 EXCLUIR UNIDADES PH", value=False)
         
-        # 1. Separar PH (Los que tienen PH repiten su propia zona)
-        df_ph = df_f[df_f[COL_UNIDAD].isin(mapeo_ph.keys())].copy()
-        for und, tec in mapeo_ph.items():
-            df_ph.loc[df_ph[COL_UNIDAD] == und, COL_TECNICO] = tec
+        c1, c2, c3 = st.columns(3)
+        with c1:
+            ciclos_sel = st.multiselect("Ciclos", sorted(df[COL_CICLO].unique().astype(str)), default=df[COL_CICLO].unique().astype(str))
+        with c2:
+            edades_disp = sorted(df[COL_EDAD].astype(str).unique())
+            prioridad_edades = st.multiselect("Prioridad de Edad:", edades_disp, default=edades_disp)
+        with c3:
+            nombres_ph = list(mapeo_ph.values())
+            tecs_reparto = sorted([t for t in df["TEC_ORI"].unique() if t not in nombres_ph and t != "nan"])
+            tecnicos_sel = st.multiselect("Técnicos Reparto", tecs_reparto, default=tecs_reparto)
         
-        # 2. Reparto General con Intercambio (Los que NO son PH se intercambian)
+        procesar = st.button("🚀 Procesar Asignación")
+
+    if procesar:
+        # Filtrado
+        df_f = df[(df[COL_CICLO].astype(str).isin(ciclos_sel)) & (df[COL_EDAD].astype(str).isin(prioridad_edades))].copy()
+        
+        # 1. Manejo de PH
+        df_ph_final = pd.DataFrame()
+        if not excluir_ph:
+            df_ph_final = df_f[df_f[COL_UNIDAD].isin(mapeo_ph.keys())].copy()
+            for und, tec in mapeo_ph.items():
+                df_ph_final.loc[df_ph_final[COL_UNIDAD] == und, COL_TECNICO] = tec
+        
+        # 2. Reparto General con Intercambio
         df_gen = df_f[~df_f[COL_UNIDAD].isin(mapeo_ph.keys())].copy()
         df_gen = df_gen.sort_values([COL_EDAD, COL_BARRIO], ascending=[False, True])
         
-        final_rows = []
+        final_reparto = []
         asignados = set()
         
-        # Bucle de asignación evitando el técnico original
-        for tec in tecs_sel:
+        for tec in tecnicos_sel:
+            # Selecciona 50 que NO sean del mismo técnico original
             pool = df_gen[(df_gen["TEC_ORI"] != tec) & (~df_gen.index.isin(asignados))].head(50)
             if not pool.empty:
                 pool[COL_TECNICO] = tec
-                final_rows.append(pool)
+                final_reparto.append(pool)
                 asignados.update(pool.index)
         
-        if final_rows or not df_ph.empty:
-            df_resultado = pd.concat([df_ph] + final_rows)
-            st.success(f"✅ Asignación lista: {len(df_resultado)} filas.")
-            st.dataframe(df_resultado.head(100))
-            
-            # Preparar descarga en Excel
-            towrite = io.BytesIO()
-            df_resultado.to_excel(towrite, index=False, engine="openpyxl")
-            st.download_button("📥 Descargar Excel", towrite.getvalue(), "Asignacion_Final.xlsx")
-        else:
-            st.warning("No se encontraron datos para los filtros seleccionados.")
+        df_resultado = pd.concat([df_ph_final] + final_reparto) if (not df_ph_final.empty or final_reparto) else pd.DataFrame()
+
+        with tab_resultado:
+            if not df_resultado.empty:
+                st.success(f"Asignación completada: {len(df_resultado)} registros.")
+                st.dataframe(df_resultado.drop(columns=["TEC_ORI"]), use_container_width=True)
+                
+                output = io.BytesIO()
+                df_resultado.drop(columns=["TEC_ORI"]).to_excel(output, index=False, engine="openpyxl")
+                st.download_button("📥 Descargar Excel", output.getvalue(), "Asignacion_Final.xlsx")
+            else:
+                st.warning("No hay datos que coincidan con los filtros.")
