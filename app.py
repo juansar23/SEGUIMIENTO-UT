@@ -10,12 +10,12 @@ st.title("📊 Distribución Geográfica Inteligente")
 mapeo_ph = {
     "ITA SUSPENSION BQ 15 PH": "HENRY CHAPMAN RUIZ",
     "ITA SUSPENSION BQ 31 PH": "SORELI FIGUEROA ALMARALES",
-    "ITA SUSPENSION BQ 32 PH": "JENNIFER MARIA ALAMO DEL VALLE",
-    "ITA SUSPENSION BQ 34 PH": "MIRANDIS MARIA MARENCO DOMINGUEZ",
+    "ITA SUSPENSION BQ 27 PH": "LEONARDO ENRRIQUE RODRIGUEZ CERRANO",
+    "ITA SUSPENSION BQ 42 PH": "MARIA TERESA SALAS OSPINO",
     "ITA SUSPENSION BQ 35 PH": "YONELIS DEL CARMEN MORELO MORELO",
     "ITA SUSPENSION BQ 36 PH": "YURANIS PATRICIA OSPINA CARCAMO",
-    "ITA SUSPENSION BQ 37 PH": "TATIANA ISABEL CASTRO GUZMAN",
-    "ITA SUSPENSION BQ 26": "STIVEN ENRRIQUE DIAZ VELASQUEZ",
+    "ITA SUSPENSION BQ 33 PH": "TATIANA PATRICIA TAMARA PUELLO",
+    "ITA SUSPENSION BQ 26 PH": "STIVEN ENRRIQUE DIAZ VELASQUEZ",
 }
 
 # Definición de columnas
@@ -40,6 +40,10 @@ def cargar_y_limpiar(file):
     df.columns = [str(c).strip().upper() for c in df.columns]
     df["TEC_ORI"] = df[COL_TECNICO].astype(str).str.strip()
     df["TIPO_UNIDAD"] = df[COL_UNIDAD].apply(tipo_unidad)
+    # Guardamos un orden de origen fijo para poder desempatar SIEMPRE igual,
+    # sin importar cuántas veces se filtre/reordene el dataframe después.
+    df = df.reset_index(drop=True)
+    df["ORDEN_ORIGEN"] = df.index
     return df
 
 archivo = st.file_uploader("Sube el archivo de Seguimiento", type=["xlsx"])
@@ -62,8 +66,8 @@ if archivo:
 
         c1, c2, c3 = st.columns(3)
         with c1:
-            ciclos_sel = st.multiselect("Ciclos", sorted(df[COL_CICLO].unique().astype(str)), default=df[COL_CICLO].unique().astype(str))
-            subcat_sel = st.multiselect("Subcategoría", sorted(df[COL_SUBCAT].unique().astype(str)), default=df[COL_SUBCAT].unique().astype(str))
+            ciclos_sel = st.multiselect("Ciclos", sorted(df[COL_CICLO].unique().astype(str)), default=sorted(df[COL_CICLO].unique().astype(str)))
+            subcat_sel = st.multiselect("Subcategoría", sorted(df[COL_SUBCAT].unique().astype(str)), default=sorted(df[COL_SUBCAT].unique().astype(str)))
         with c2:
             edades_disp = sorted([str(e) for e in df[COL_EDAD].unique() if str(e).lower() != "nan"])
             edades_sel = st.multiselect("Prioridad de Edad:", edades_disp, default=edades_disp)
@@ -92,13 +96,30 @@ if archivo:
         ejecutar = st.button("🚀 Iniciar Distribución Geográfica")
 
     if ejecutar:
+        # FIX 2: el orden en que Streamlit devuelve el multiselect depende del
+        # orden en que el usuario clickeó/deseleccionó las opciones, no es alfabético.
+        # Si no se fija ese orden, la asignación cambia cada vez que tocas un filtro
+        # aunque el conjunto de técnicos seleccionados sea el mismo.
+        tecnicos_gestion_sel = sorted(tecnicos_gestion_sel)
+        tecnicos_suspension_sel = sorted(tecnicos_suspension_sel)
+
         df_base = df[
             (df[COL_CICLO].astype(str).isin(ciclos_sel)) &
             (df[COL_EDAD].astype(str).isin(edades_sel)) &
             (df[COL_SUBCAT].astype(str).isin(subcat_sel))
         ].copy()
 
-        df_base = df_base.sort_values([COL_CICLO, COL_BARRIO, COL_DIRECCION])
+        # FIX 1: sort_values usa quicksort por defecto, que NO es estable.
+        # Con filas repetidas (mismo ciclo/barrio/dirección) el orden de los
+        # empates puede variar entre corridas según cómo quede particionado
+        # el array tras cada filtro -> por eso "se revolvían" los barrios y
+        # direcciones. kind="mergesort" es estable: a igual contenido filtrado,
+        # siempre el mismo orden. Como respaldo agregamos ORDEN_ORIGEN como
+        # último criterio de desempate, así el resultado es 100% reproducible.
+        df_base = df_base.sort_values(
+            [COL_CICLO, COL_BARRIO, COL_DIRECCION, "ORDEN_ORIGEN"],
+            kind="mergesort"
+        ).reset_index(drop=True)
 
         indices_ocupados = set()
         lista_final = []
@@ -183,10 +204,10 @@ if archivo:
                 partes = ([df_ph_final] if not df_ph_final.empty else []) + lista_final
                 df_res = pd.concat(partes, ignore_index=True)
                 st.success(f"Asignación terminada: {len(df_res)} pólizas.")
-                st.dataframe(df_res.drop(columns=["TEC_ORI", "TIPO_UNIDAD"]), use_container_width=True)
+                st.dataframe(df_res.drop(columns=["TEC_ORI", "TIPO_UNIDAD", "ORDEN_ORIGEN"]), use_container_width=True)
 
                 output = io.BytesIO()
-                df_res.drop(columns=["TEC_ORI", "TIPO_UNIDAD"]).to_excel(output, index=False)
+                df_res.drop(columns=["TEC_ORI", "TIPO_UNIDAD", "ORDEN_ORIGEN"]).to_excel(output, index=False)
                 st.download_button("📥 Descargar Reporte", output.getvalue(), "Reparto_Geografico.xlsx")
             else:
                 st.warning("No se encontraron registros con los filtros actuales.")
